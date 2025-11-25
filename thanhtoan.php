@@ -89,14 +89,19 @@ if (isset($_GET['buyNow']) && $_GET['buyNow'] == '1') {
     </div>
 
     <script>
-    // chặn submit thật. hiện thông báo. quay lại trang chủ.
+    // xử lý submit: nếu chọn chuyển khoản thì sang trang ngân hàng, ngược lại báo thành công và về trang chủ
     document.getElementById('buyNowForm').addEventListener('submit', function(e){
       e.preventDefault();
 
-      alert('Đặt hàng thành công');
+      const method = this.payment_method.value;
 
-      // chuyển về trang chủ
-      window.location.href = 'trangchu.php';
+      if (method === 'bank') {
+        // chuyển sang trang thanh toán ngân hàng
+        window.location.href = 'bank.php';
+      } else {
+        alert('Đặt hàng thành công');
+        window.location.href = 'trangchu.php';
+      }
     });
     </script>
 
@@ -222,13 +227,18 @@ hiddenInput.value = JSON.stringify(cartData);
 document.getElementById('cartCheckoutForm').addEventListener('submit', function(e){
   e.preventDefault();
 
-  alert('Đặt hàng thành công');
+  const method = this.payment_method.value;
 
-  // clear giỏ vì đã đặt hàng
-  localStorage.removeItem('cart');
-
-  // quay lại trang chủ
-  window.location.href = 'trangchu.php';
+  if (method === 'bank') {
+    // xóa giỏ hàng trước khi sang trang ngân hàng
+    localStorage.removeItem('cart');
+    // qua trang thanh toán ngân hàng
+    window.location.href = 'bank.php';
+  } else {
+    alert('Đặt hàng thành công');
+    localStorage.removeItem('cart');
+    window.location.href = 'trangchu.php';
+  }
 });
 </script>
 

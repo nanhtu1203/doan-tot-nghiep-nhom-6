@@ -4,12 +4,12 @@ require 'connect.php';
 
 // ====== XỬ LÝ ĐẶT HÀNG (KHÁCH HÀNG ĐẶT TỪ GIỎ MINI) ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
-    $customer_name  = $_POST['name'] ?? '';
-    $customer_phone = $_POST['phone'] ?? '';
-    $customer_addr  = $_POST['address'] ?? '';
+    $customerName    = $_POST['name'] ?? '';
+    $customerPhone   = $_POST['phone'] ?? '';
+    $customerAddress = $_POST['address'] ?? '';
 
     // Sinh mã đơn hàng ngẫu nhiên
-    $order_code = 'HD' . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6));
+    $orderCode = 'HD' . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6));
 
     // Lấy giỏ hàng từ session (giả sử lưu ở đây)
     $cart = $_SESSION['cart'] ?? [];
@@ -18,32 +18,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
         // Lưu đơn hàng chính
         $stmt = $conn->prepare("INSERT INTO orders (order_code, customer_name, customer_phone, customer_addr, created_at) 
                                 VALUES (?, ?, ?, ?, NOW())");
-        $stmt->execute([$order_code, $customer_name, $customer_phone, $customer_addr]);
-        $order_id = $conn->lastInsertId();
+        $stmt->execute([$orderCode, $customerName, $customerPhone, $customerAddress]);
+        $orderId = $conn->lastInsertId();
 
         // Lưu chi tiết sản phẩm
-        foreach ($cart as $product_id => $item) {
+        foreach ($cart as $productId => $item) {
             $stmt2 = $conn->prepare("INSERT INTO order_items (order_id, product_id, quantity, price)
                                      VALUES (?, ?, ?, ?)");
-            $stmt2->execute([$order_id, $product_id, $item['qty'], $item['price']]);
+            $stmt2->execute([$orderId, $productId, $item['qty'], $item['price']]);
         }
 
         // clear cart
         unset($_SESSION['cart']);
 
         // chuyển cho người bán xem đơn
-        header("Location: seller.php?order_code=" . urlencode($order_code));
+        header("Location: seller.php?order_code=" . urlencode($orderCode));
         exit;
     }
 }
 
 // ====== LẤY SẢN PHẨM TỪ DATABASE ĐỂ HIỂN THỊ NGOÀI TRANG CHỦ ======
-$stmtProd = $conn->prepare("
-    SELECT id, name, brand, price, old_price, sale_percent, category, gender, material, color, pattern, sizes, image_main
-    FROM products
-    ORDER BY id DESC
-");
-$stmtProd->execute();
+$category = $_GET['category'] ?? '';
+
+if ($category !== '') {
+    $stmtProd = $conn->prepare("
+        SELECT id, name, brand, price, old_price, sale_percent, category, gender, material, color, pattern, sizes, image_main
+        FROM products
+        WHERE category = ?
+        ORDER BY id DESC
+    ");
+    $stmtProd->execute([$category]);
+} else {
+    $stmtProd = $conn->prepare("
+        SELECT id, name, brand, price, old_price, sale_percent, category, gender, material, color, pattern, sizes, image_main
+        FROM products
+        ORDER BY id DESC
+    ");
+    $stmtProd->execute();
+}
+
 $products = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
 
 // helper format giá kiểu 290.000₫
@@ -265,10 +278,33 @@ function vnd($n){
             DANH MỤC
           </a>
           <ul class="dropdown-menu" aria-labelledby="categoryMenu">
-            <li><a class="dropdown-item" href="#">GIÀY THỂ THAO LÀM BẰNG DA</a></li>
-            <li><a class="dropdown-item" href="#">GIÀY THỂ THAO LÀM BẰNG DA TỔNG HỢP</a></li>
-            <li><a class="dropdown-item" href="#">GIÀY THỂ THAO LÀM BẰNG VẢI CAO CẤP</a></li>
-            <li><a class="dropdown-item" href="#">HÀNG MỚI VỀ</a></li>
+            <li>
+              <a class="dropdown-item" href="trangchu.php">
+                TẤT CẢ SẢN PHẨM
+              </a>
+            </li>
+            <li><hr class="dropdown-divider"></li>
+
+            <li>
+              <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-da">
+                GIÀY THỂ THAO LÀM BẰNG DA
+              </a>
+            </li>
+            <li>
+              <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-da-tong-hop">
+                GIÀY THỂ THAO LÀM BẰNG DA TỔNG HỢP
+              </a>
+            </li>
+            <li>
+              <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-vai-cao-cap">
+                GIÀY THỂ THAO LÀM BẰNG VẢI CAO CẤP
+              </a>
+            </li>
+            <li>
+              <a class="dropdown-item" href="trangchu.php?category=hang-moi-ve">
+                HÀNG MỚI VỀ
+              </a>
+            </li>
           </ul>
         </li>
       </ul>
@@ -446,10 +482,52 @@ function vnd($n){
     </div>
 
   </div>
+
+  <!-- Banner chuyển ảnh liên tục 2s -->
+  <div id="bannerSlide"
+       class="carousel slide"
+       data-bs-ride="carousel"
+       data-bs-interval="2000"
+       data-bs-pause="false"
+       data-bs-wrap="true">
+
+    <div class="carousel-inner">
+      <div class="carousel-item active">
+        <img src="../images/anh1.jpg"
+             class="d-block w-100" alt="Banner 1">
+      </div>
+
+      <div class="carousel-item">
+        <img src="../images/anh2.jpg"
+             class="d-block w-100" alt="Banner 2">
+      </div>
+
+      <div class="carousel-item">
+        <img src="../images/anh3.jpg"
+             class="d-block w-100" alt="Banner 3">
+      </div>
+
+      <div class="carousel-item">
+        <img src="../images/anh4.jpg"
+             class="d-block w-100" alt="Banner 4">
+      </div>
+    </div>
+
+    <!-- Nút chuyển trái/phải (nếu cần) -->
+    <button class="carousel-control-prev" type="button" data-bs-target="#bannerSlide" data-bs-slide="prev">
+      <span class="carousel-control-prev-icon"></span>
+      <span class="visually-hidden">Previous</span>
+    </button>
+
+    <button class="carousel-control-next" type="button" data-bs-target="#bannerSlide" data-bs-slide="next">
+      <span class="carousel-control-next-icon"></span>
+      <span class="visually-hidden">Next</span>
+    </button>
+  </div>
+
 </section>
 
 <!-- PRODUCT GRID (render từ DB) -->
- 
 <section class="container py-3">
   <div class="row g-3">
 
