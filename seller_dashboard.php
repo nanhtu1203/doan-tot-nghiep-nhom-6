@@ -2,644 +2,649 @@
 session_start();
 require 'connect.php';
 
-// Chặn người chưa đăng nhập seller
-if (!isset($_SESSION['seller_id'])) {
+// Chỉ chuyển hướng nếu CHƯA có session
+if (empty($_SESSION['seller_name'])) {
     header("Location: seller_login.php");
     exit;
 }
 
-$seller_id = $_SESSION['seller_id'];
+$sellerName = $_SESSION['seller_name'];
 
-// Biến thông báo
-$message = "";
 
-// Dữ liệu mặc định cho form (khi thêm mới)
-$editProduct = [
-    'id'            => '',
-    'name'          => '',
-    'brand'         => 'TheGioiGiay',
-    'price'         => '',
-    'old_price'     => '',
-    'sale_percent'  => '',
-    'category'      => '',
-    'gender'        => '',
-    'material'      => '',
-    'color'         => '',
-    'pattern'       => '',
-    'sizes'         => '',
-    'image_main'    => ''
-];
 
-// Nếu có tham số edit_id thì load sản phẩm để sửa
-if (isset($_GET['edit_id'])) {
-    $pid = (int)$_GET['edit_id'];
-
-    $st = $conn->prepare("SELECT * FROM products WHERE id = ? AND seller_id = ?");
-    $st->execute([$pid, $seller_id]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
-
-    if ($row) {
-        $editProduct = $row;
-    }
+// --------- HÀM FORMAT TIỀN ----------
+function vnd($n) {
+    return number_format((int)$n, 0, ',', '.') . 'đ';
 }
 
-// Khi submit form Lưu sản phẩm
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
-    $pid          = $_POST['product_id']    ?? '';
-    $name         = $_POST['name']          ?? '';
-    $brand        = $_POST['brand']         ?? 'TheGioiGiay';
-    $price        = $_POST['price']         ?? 0;
-    $old_price    = $_POST['old_price']     ?? null;
-    $sale_percent = $_POST['sale_percent']  ?? null;
-    $category     = $_POST['category']      ?? '';
-    $gender       = $_POST['gender']        ?? '';
-    $material     = $_POST['material']      ?? '';
-    $color        = $_POST['color']         ?? '';
-    $pattern      = $_POST['pattern']       ?? '';
-    $sizes_arr    = $_POST['sizes']         ?? [];  // checkbox multiple
-    $sizes_str    = implode(",", $sizes_arr);
+// --------- XỬ LÝ ĐỔI TRẠNG THÁI ĐƠN HÀNG ----------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
+    $orderId = (int)($_POST['order_id'] ?? 0);
+    $status  = $_POST['status'] ?? '';
 
-    // Ảnh hiện tại (trường hợp sửa sản phẩm cũ)
-    $image_main = $_POST['current_image'] ?? '';
-
-    // Nếu upload ảnh mới thì ghi đè
-    if (!empty($_FILES['image_main']['name'])) {
-        if (!is_dir('uploads')) {
-            mkdir('uploads', 0777, true);
-        }
-        $fname  = time() . "_" . basename($_FILES['image_main']['name']);
-        $target = "uploads/" . $fname;
-        if (move_uploaded_file($_FILES['image_main']['tmp_name'], $target)) {
-            $image_main = $target;
-        }
+    // thêm 'Đã trả hàng' vào danh sách trạng thái đích cho phép
+    $allow = ['Đang xử lý','Đã duyệt','Đang giao','Đã giao','Đã hủy','Đã trả hàng'];
+    if ($orderId > 0 && in_array($status, $allow, true)) {
+        $stmt = $conn->prepare("UPDATE orders SET status = ? WHERE id = ?");
+        $stmt->execute([$status, $orderId]);
     }
-
-    // Nếu product_id rỗng => thêm mới
-    if ($pid === '') {
-        $sql = "INSERT INTO products
-                (seller_id, name, brand, price, old_price, sale_percent, category, gender, material, color, pattern, sizes, image_main)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
-        $st = $conn->prepare($sql);
-        $st->execute([
-            $seller_id,
-            $name,
-            $brand,
-            $price,
-            $old_price,
-            $sale_percent,
-            $category,
-            $gender,
-            $material,
-            $color,
-            $pattern,
-            $sizes_str,
-            $image_main
-        ]);
-
-        $message = "Đã thêm sản phẩm mới thành công.";
-    } else {
-        // Ngược lại => cập nhật sản phẩm đã có (đảm bảo đúng seller_id)
-        $sql = "UPDATE products SET
-                    name = ?,
-                    brand = ?,
-                    price = ?,
-                    old_price = ?,
-                    sale_percent = ?,
-                    category = ?,
-                    gender = ?,
-                    material = ?,
-                    color = ?,
-                    pattern = ?,
-                    sizes = ?,
-                    image_main = ?
-                WHERE id = ? AND seller_id = ?";
-        $st = $conn->prepare($sql);
-        $st->execute([
-            $name,
-            $brand,
-            $price,
-            $old_price,
-            $sale_percent,
-            $category,
-            $gender,
-            $material,
-            $color,
-            $pattern,
-            $sizes_str,
-            $image_main,
-            $pid,
-            $seller_id
-        ]);
-
-        $message = "Đã cập nhật sản phẩm #$pid.";
-    }
-
-    // Sau khi lưu xong đưa thẳng ra trangchu.php để xem sản phẩm đã public
-    header("Location: trangchu.php");
+    header('Location: seller_login.php');
     exit;
 }
 
-// Lấy danh sách sản phẩm của người bán đang đăng nhập để liệt kê bên dưới
-$stList = $conn->prepare("SELECT id, name, price, image_main FROM products WHERE seller_id = ? ORDER BY id DESC");
-$stList->execute([$seller_id]);
-$allProducts = $stList->fetchAll(PDO::FETCH_ASSOC);
+// --------- LẤY TAB HIỆN TẠI ----------
+$tab = $_GET['tab'] ?? 'products';
 
-// Check message qua GET (trong trường hợp vẫn muốn dùng)
-if (isset($_GET['msg'])) {
-    $message = $_GET['msg'];
+// --------- LẤY DỮ LIỆU PHỤC VỤ TỪNG TAB ----------
+
+// 1. TAB XỬ LÝ ĐƠN HÀNG
+$ordersProcessing = [];
+if ($tab === 'orders') {
+    // thêm 'Yêu cầu trả hàng' để người bán xử lý
+    $stmt = $conn->prepare("
+        SELECT id, order_code, customer_name, customer_phone,
+               total_amount, status, created_at
+        FROM orders
+        WHERE status IN ('Đang xử lý','Đã duyệt','Đang giao','Yêu cầu trả hàng')
+        ORDER BY created_at DESC
+    ");
+    $stmt->execute();
+    $ordersProcessing = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Chuẩn bị checkbox size
-$current_sizes = explode(",", $editProduct['sizes']);
+// 2. TAB LỊCH SỬ ĐÃ BÁN + DOANH THU
+$totalOrdersTemp = $totalRevenueTemp = $totalRevenueFinal = 0;
+$salesHistory = [];
+if ($tab === 'sales') {
+    // Doanh thu tạm tính: đơn đã duyệt + đang giao + đã giao
+    $stmt = $conn->prepare("
+        SELECT 
+            COUNT(*) AS cnt,
+            COALESCE(SUM(total_amount),0) AS sum
+        FROM orders
+        WHERE status IN ('Đã duyệt','Đang giao','Đã giao')
+    ");
+    $stmt->execute();
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $totalOrdersTemp   = (int)$row['cnt'];
+    $totalRevenueTemp  = (int)$row['sum'];
 
-function checkedSize($arr, $val){
-    return in_array($val, $arr) ? 'checked' : '';
+    // Doanh thu hoàn thành: chỉ tính đơn đã giao
+    $stmt = $conn->prepare("
+        SELECT COALESCE(SUM(total_amount),0) AS sum
+        FROM orders
+        WHERE status = 'Đã giao'
+    ");
+    $stmt->execute();
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $totalRevenueFinal = (int)$row['sum'];
+
+    // Danh sách lịch sử: thêm cả đơn trả hàng
+    $stmt = $conn->prepare("
+        SELECT id, order_code, customer_name, customer_phone,
+               total_amount, status, created_at
+        FROM orders
+        WHERE status IN ('Đã duyệt','Đang giao','Đã giao','Đã hủy','Yêu cầu trả hàng','Đã trả hàng')
+        ORDER BY created_at DESC
+    ");
+    $stmt->execute();
+    $salesHistory = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// 3. TAB QUẢN LÝ KHÁCH HÀNG
+$customers = [];
+if ($tab === 'customers') {
+    $stmt = $conn->prepare("
+        SELECT 
+            customer_name,
+            customer_phone,
+            customer_addr,
+            COUNT(*) AS total_orders,
+            COALESCE(SUM(total_amount),0) AS total_spent
+        FROM orders
+        GROUP BY customer_name, customer_phone, customer_addr
+        ORDER BY total_spent DESC
+    ");
+    $stmt->execute();
+    $customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// 4. TAB THEO DÕI ĐƠN HÀNG (TIMELINE ĐƠN GẦN ĐÂY)
+$orderTimeline = [];
+if ($tab === 'tracking') {
+    $stmt = $conn->prepare("
+        SELECT id, order_code, customer_name, customer_phone,
+               total_amount, status, created_at
+        FROM orders
+        ORDER BY created_at DESC
+        LIMIT 50
+    ");
+    $stmt->execute();
+    $orderTimeline = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 ?>
 <!doctype html>
 <html lang="vi">
 <head>
-    <meta charset="utf-8">
-    <title>Bảng quản lý người bán</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>Bảng điều khiển người bán</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 
-    <!-- Bootstrap (tùy chọn) -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+/* ================== RESET ================== */
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 
-    <!-- CSS giao diện dashboard người bán -->
-    <style>
-        :root{
-            --bg: #f3f4f6;
-            --card-bg: #ffffff;
-            --border: #e5e7eb;
-            --primary: #111827;
-            --accent: #ff6b00; /* màu cam cho Thế Giới Giày */
-        }
+body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #fff4ee;          /* nền trắng cam kiểu Shopee */
+    color: #222;
+}
 
-        *{
-            box-sizing: border-box;
-        }
+/* ================== NAVBAR ================== */
+.navbar {
+    background: #ff5722;
+    color: #fff;
+    border-bottom: 1px solid #ff8a50;
+}
 
-        body{
-            margin:0;
-            padding:20px;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: var(--bg);
-            color: var(--primary);
-        }
+.navbar .navbar-brand {
+    font-weight: 600;
+}
 
-        .page-wrapper{
-            max-width: 1100px;
-            margin: 0 auto;
-        }
+.navbar .btn-outline-light {
+    border-color: #ffe0d1;
+    color: #ffe0d1;
+}
 
-        .headerRow{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:16px;
-            padding:16px 20px;
-            background:#111827;
-            color:#fff;
-            border-radius:14px;
-            box-shadow:0 12px 30px rgba(15,23,42,0.25);
-            margin-bottom:24px;
-        }
-        .headerLeft h2{
-            margin:0;
-            font-size:20px;
-            font-weight:700;
-        }
-        .headerLeft small{
-            font-size:13px;
-            opacity:0.85;
-        }
-        .headerRight a{
-            font-size:13px;
-            color:#f9fafb;
-            text-decoration:none;
-            font-weight:600;
-            margin-left:16px;
-            padding:6px 10px;
-            border-radius:999px;
-            border:1px solid rgba(249,250,251,0.3);
-            transition:0.2s;
-            background: rgba(15,23,42,0.4);
-        }
-        .headerRight a:hover{
-            background:#f9fafb;
-            color:#111827;
-        }
+.navbar .btn-outline-light:hover {
+    background: #ffe0d1;
+    color: #c62828;
+}
 
-        .blockCard{
-            background:var(--card-bg);
-            border:1px solid var(--border);
-            border-radius:14px;
-            padding:18px 18px 20px;
-            box-shadow:0 10px 25px rgba(15,23,42,0.08);
-            margin-bottom:20px;
-        }
-        .blockCard h3{
-            margin-top:0;
-            margin-bottom:14px;
-            font-size:17px;
-            font-weight:600;
-        }
+/* ================== TABS ================== */
+.nav-tabs {
+    background: #ffffff;
+    border-bottom: 1px solid #ffd7cc;
+}
 
-        .msg{
-            color:#16a34a;
-            font-size:14px;
-            margin-bottom:10px;
-        }
+.nav-tabs .nav-link {
+    padding: 10px 20px;
+    color: #555;
+    border: none;
+    border-radius: 0;
+}
 
-        label{
-            display:block;
-            margin-bottom:4px;
-            margin-top:10px;
-            font-size:13px;
-            font-weight:600;
-            color:#374151;
-        }
-        input[type=text],
-        input[type=number],
-        input[type=file]{
-            width:100%;
-            max-width:360px;
-            padding:7px 10px;
-            border:1px solid #d1d5db;
-            border-radius:8px;
-            font-size:14px;
-            transition:0.2s;
-            background:#f9fafb;
-        }
-        input[type=text]:focus,
-        input[type=number]:focus,
-        input[type=file]:focus{
-            outline:none;
-            border-color:#111827;
-            background:#ffffff;
-            box-shadow:0 0 0 3px rgba(15,23,42,0.08);
-        }
+.nav-tabs .nav-link:hover {
+    color: #ff5722;
+    background: #fff7f3;
+}
 
-        .size-box{
-            display:inline-flex;
-            align-items:center;
-            gap:4px;
-            margin-right:10px;
-            margin-top:4px;
-            font-size:13px;
-        }
-        .size-box input{
-            width:auto;
-        }
+.nav-tabs .nav-link.active {
+    color: #ff5722;
+    font-weight: 600;
+    border-bottom: 3px solid #ff5722;
+    background: #ffffff;
+}
 
-        .productImgPreview{
-            max-width:110px;
-            display:block;
-            margin-bottom:8px;
-            border:1px solid #e5e7eb;
-            border-radius:8px;
-        }
+/* ================== CARD WRAPPER ================== */
+.container-fluid {
+    max-width: 1200px;
+}
 
-        .saveBtn{
-            background:#111827;
-            color:#fff;
-            border:0;
-            padding:9px 18px;
-            border-radius:999px;
-            font-size:14px;
-            font-weight:600;
-            cursor:pointer;
-            margin-top:16px;
-            transition:0.2s;
-        }
-        .saveBtn:hover{
-            background:#fff;
-            color:#111827;
-            border:1px solid #111827;
-        }
+/* card tone trắng cam */
+.card {
+    background: #ffffff;
+    border-radius: 10px;
+    border: 1px solid #ffd7cc;
+}
 
-        /* nhóm checkbox danh mục */
-        .cat-group{
-            display:flex;
-            flex-direction:column;
-            gap:4px;
-            margin-top:4px;
-        }
-        .cat-item{
-            font-size:13px;
-            display:flex;
-            align-items:center;
-            gap:6px;
-        }
-        .cat-item input{
-            width:auto;
-        }
+.card-header {
+    background: #fff3ec;
+    border-bottom: 1px solid #ffd7cc;
+    color: #ff5722;
+    font-weight: 600;
+}
 
-        table{
-            width:100%;
-            border-collapse:collapse;
-            margin-top:10px;
-            font-size:13px;
-        }
-        table thead{
-            background:#f9fafb;
-        }
-        th,td{
-            border:1px solid #e5e7eb;
-            padding:8px 10px;
-            vertical-align:middle;
-        }
-        th{
-            font-weight:600;
-            color:#374151;
-        }
-        td a{
-            color:var(--accent);
-            font-weight:600;
-            text-decoration:none;
-            font-size:13px;
-        }
-        td a:hover{
-            text-decoration:underline;
-        }
+.card-body {
+    background: #ffffff;
+}
 
-        /* overlay xác nhận đăng xuất */
-        #logoutBox {
-            display:none;
-            position:fixed;left:0;top:0;width:100%;height:100%;
-            background:rgba(0,0,0,0.55);
-            align-items:center;justify-content:center;
-            z-index:9999;
-        }
-        #logoutBox .wrap {
-            background:#ffffff;
-            padding:18px 20px;
-            border-radius:12px;
-            max-width:300px;
-            text-align:center;
-            box-shadow:0 20px 40px rgba(0,0,0,0.25);
-        }
-        #logoutBox p{
-            margin:0 0 14px;
-            font-size:14px;
-            color:#111827;
-        }
-        .logoutBtn{
-            background:var(--accent);
-            color:#fff;
-            border:0;
-            padding:7px 14px;
-            cursor:pointer;
-            margin:0 6px;
-            border-radius:999px;
-            font-size:13px;
-            font-weight:600;
-            transition:0.2s;
-        }
-        .logoutBtn:nth-child(2){
-            background:#e5e7eb;
-            color:#111827;
-        }
-        .logoutBtn:hover{
-            transform:translateY(-1px);
-            box-shadow:0 6px 16px rgba(0,0,0,0.15);
-        }
+/* ================== KPI / DOANH THU ================== */
+.summary-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 10px;
+}
 
-        /* Responsive */
-        @media (max-width: 768px){
-            body{
-                padding:12px;
-            }
-            .headerRow{
-                flex-direction:column;
-                align-items:flex-start;
-            }
-            input[type=text],
-            input[type=number],
-            input[type=file]{
-                max-width:100%;
-            }
-        }
-    </style>
+.summary-card {
+    background: #020617;
+    border-radius: 10px;
+    padding: 14px 16px;
+    border: 1px solid #1e293b;
+    color: #e5e7eb;
+}
+
+.summary-card-title {
+    font-size: 13px;
+    opacity: 0.7;
+}
+
+.summary-card-value {
+    margin-top: 4px;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.summary-card-value.temp { color: #22c55e; }
+.summary-card-value.done { color: #38bdf8; }
+
+/* ================== TABLE ================== */
+.table {
+    border-collapse: collapse;
+    background: #ffffff;
+}
+
+.table thead {
+    background: #fff0e6;
+}
+
+.table thead th {
+    color: #ff5722;
+    font-weight: 600;
+    border-bottom: 1px solid #ffd7cc;
+    font-size: 13px;
+}
+
+.table tbody td {
+    border-bottom: 1px solid #ffe2d5;
+    font-size: 13px;
+    color: #333;
+}
+
+.table tbody tr:hover {
+    background: #fff7f3;
+}
+
+/* ================== TRẠNG THÁI ĐƠN HÀNG ================== */
+.badge-status {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.badge-status.status-pending {   /* Đang xử lý */
+    background: #ffe5d6;
+    color: #ff5722;
+}
+
+.badge-status.status-approved {  /* Đã duyệt */
+    background: #ffd1ba;
+    color: #d84315;
+}
+
+.badge-status.status-shipping {  /* Đang giao */
+    background: #ffecb3;
+    color: #f57c00;
+}
+
+.badge-status.status-done {      /* Đã giao */
+    background: #c8e6c9;
+    color: #2e7d32;
+}
+
+.badge-status.status-cancel {    /* Đã hủy */
+    background: #ffcdd2;
+    color: #c62828;
+}
+
+/* yêu cầu trả hàng */
+.badge-status.status-return-request {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+/* đã trả hàng xong */
+.badge-status.status-return-done {
+    background: #d1c4e9;
+    color: #4527a0;
+}
+
+/* ================== BUTTONS ================== */
+.btn-orange,
+.btn-primary {
+    background: #ff5722;
+    border-color: #ff5722;
+}
+
+.btn-orange:hover,
+.btn-primary:hover {
+    background: #e64a19;
+    border-color: #e64a19;
+}
+
+/* Responsive */
+@media (max-width: 992px) {
+    .summary-row {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
 </head>
 <body>
 
-<div class="page-wrapper">
+<nav class="navbar navbar-dark px-3">
+    <span class="navbar-brand mb-0 h5">Bảng điều khiển người bán</span>
+    <div class="d-flex gap-2">
+        <a href="trangchu.php" class="btn btn-outline-light btn-sm">Về trang mua hàng</a>
+        <a href="seller_login.php" class="btn btn-danger btn-sm">Đăng xuất</a>
 
-    <div class="headerRow">
-        <div class="headerLeft">
-            <h2>Quản lý sản phẩm</h2>
-            <small>
-              Chủ shop:
-              <?php echo htmlspecialchars($_SESSION['shop_name'] ?? ''); ?>
-            </small>
-        </div>
-        <div class="headerRight">
-            <a href="trangchu.php" target="_blank">Xem trang chủ</a>
-            <a onclick="showLogout()" href="#">Đăng xuất</a>
-        </div>
     </div>
+</nav>
 
-    <?php if ($message !== ""): ?>
-    <div class="msg"><?php echo htmlspecialchars($message); ?></div>
+<ul class="nav nav-tabs seller-tabs px-3">
+    <li class="nav-item">
+        <a class="nav-link <?= $tab==='products'?'active':'' ?>" href="?tab=products">Quản lý sản phẩm</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab==='orders'?'active':'' ?>" href="?tab=orders">Xử lý đơn hàng</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab==='sales'?'active':'' ?>" href="?tab=sales">Lịch sử đã bán</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab==='customers'?'active':'' ?>" href="?tab=customers">Quản lý khách hàng</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab==='tracking'?'active':'' ?>" href="?tab=tracking">Theo dõi đơn hàng</a>
+    </li>
+</ul>
+
+<div class="container-fluid py-4">
+    <?php if ($tab === 'products'): ?>
+        <!-- TAB QUẢN LÝ SẢN PHẨM -->
+        <div class="card">
+            <div class="card-header">Quản lý sản phẩm</div>
+            <div class="card-body">
+                <p>Chuyển sang trang quản lý sản phẩm chi tiết:</p>
+                <a href="seller_products.php" class="btn btn-orange btn-sm">Mở trang quản lý sản phẩm</a>
+            </div>
+        </div>
+
+    <?php elseif ($tab === 'orders'): ?>
+        <!-- TAB XỬ LÝ ĐƠN HÀNG -->
+        <div class="card mb-3">
+            <div class="card-header">Đơn hàng cần xử lý</div>
+            <div class="card-body p-0">
+                <?php if (!$ordersProcessing): ?>
+                    <p class="p-3 text-secondary mb-0">Hiện chưa có đơn cần xử lý.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table mb-0 align-middle">
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Mã đơn</th>
+                                <th>Khách hàng</th>
+                                <th>SĐT</th>
+                                <th>Tổng tiền</th>
+                                <th>Trạng thái</th>
+                                <th>Ngày tạo</th>
+                                <th class="text-end">Hành động</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($ordersProcessing as $i => $o):
+                                $statusClass = match($o['status']) {
+                                    'Đang xử lý'      => 'status-pending',
+                                    'Đã duyệt'        => 'status-approved',
+                                    'Đang giao'       => 'status-shipping',
+                                    'Đã giao'         => 'status-done',
+                                    'Đã hủy'          => 'status-cancel',
+                                    'Yêu cầu trả hàng'=> 'status-return-request',
+                                    'Đã trả hàng'     => 'status-return-done',
+                                    default           => 'status-pending'
+                                };
+                            ?>
+                                <tr>
+                                    <td><?= $i+1 ?></td>
+                                    <td><strong><?= htmlspecialchars($o['order_code']) ?></strong></td>
+                                    <td><?= htmlspecialchars($o['customer_name']) ?></td>
+                                    <td><?= htmlspecialchars($o['customer_phone']) ?></td>
+                                    <td><?= vnd($o['total_amount']) ?></td>
+                                    <td>
+                                        <span class="badge-status <?= $statusClass ?>">
+                                            <?= htmlspecialchars($o['status']) ?>
+                                        </span>
+                                    </td>
+                                    <td><?= htmlspecialchars($o['created_at']) ?></td>
+                                    <td class="text-end">
+                                        <form method="post" class="d-inline">
+                                            <input type="hidden" name="order_id" value="<?= $o['id'] ?>">
+                                            <input type="hidden" name="update_status" value="1">
+
+                                            <?php if ($o['status'] === 'Đang xử lý'): ?>
+                                                <input type="hidden" name="status" value="Đã duyệt">
+                                                <button class="btn btn-success btn-sm">Duyệt đơn</button>
+
+                                            <?php elseif ($o['status'] === 'Đã duyệt'): ?>
+                                                <input type="hidden" name="status" value="Đang giao">
+                                                <button class="btn btn-warning btn-sm">Đánh dấu đang giao</button>
+
+                                            <?php elseif ($o['status'] === 'Đang giao'): ?>
+                                                <input type="hidden" name="status" value="Đã giao">
+                                                <button class="btn btn-primary btn-sm">Hoàn thành</button>
+
+                                            <?php elseif ($o['status'] === 'Yêu cầu trả hàng'): ?>
+                                                <!-- Nút duyệt trả hàng -->
+                                                <input type="hidden" name="status" value="Đã trả hàng">
+                                                <button class="btn btn-outline-primary btn-sm">
+                                                    Duyệt trả hàng
+                                                </button>
+                                            <?php endif; ?>
+                                        </form>
+
+                                        <?php
+                                        // Không cho hủy các trạng thái đã giao / đã trả / yêu cầu trả
+                                        if (!in_array($o['status'], ['Đã giao','Đã trả hàng','Yêu cầu trả hàng'], true)): ?>
+                                            <form method="post" class="d-inline ms-1">
+                                                <input type="hidden" name="order_id" value="<?= $o['id'] ?>">
+                                                <input type="hidden" name="update_status" value="1">
+                                                <input type="hidden" name="status" value="Đã hủy">
+                                                <button class="btn btn-outline-danger btn-sm">Hủy</button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+    <?php elseif ($tab === 'sales'): ?>
+        <!-- TAB LỊCH SỬ ĐÃ BÁN + DOANH THU -->
+        <div class="card mb-3">
+            <div class="card-header">Tổng quan doanh thu</div>
+            <div class="card-body">
+                <div class="summary-row">
+                    <div class="summary-card">
+                        <div class="summary-card-title">
+                            Tổng đơn đã bán (đã duyệt + đang giao + đã giao)
+                        </div>
+                        <div class="summary-card-value">
+                            <?= $totalOrdersTemp ?>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-card-title">
+                            Doanh thu tạm tính
+                        </div>
+                        <div class="summary-card-value temp">
+                            <?= vnd($totalRevenueTemp) ?>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-card-title">
+                            Doanh thu hoàn thành (đơn đã giao)
+                        </div>
+                        <div class="summary-card-value done">
+                            <?= vnd($totalRevenueFinal) ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Danh sách đơn đã xử lý</div>
+            <div class="card-body p-0">
+                <?php if (!$salesHistory): ?>
+                    <p class="p-3 text-secondary mb-0">Chưa có đơn hàng trong lịch sử.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table mb-0 align-middle">
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Mã đơn</th>
+                                <th>Khách hàng</th>
+                                <th>SĐT</th>
+                                <th>Tổng tiền</th>
+                                <th>Trạng thái</th>
+                                <th>Ngày tạo</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($salesHistory as $i => $o):
+                                $statusClass = match($o['status']) {
+                                    'Đang xử lý'      => 'status-pending',
+                                    'Đã duyệt'        => 'status-approved',
+                                    'Đang giao'       => 'status-shipping',
+                                    'Đã giao'         => 'status-done',
+                                    'Đã hủy'          => 'status-cancel',
+                                    'Yêu cầu trả hàng'=> 'status-return-request',
+                                    'Đã trả hàng'     => 'status-return-done',
+                                    default           => 'status-pending'
+                                };
+                            ?>
+                                <tr>
+                                    <td><?= $i+1 ?></td>
+                                    <td><strong><?= htmlspecialchars($o['order_code']) ?></strong></td>
+                                    <td><?= htmlspecialchars($o['customer_name']) ?></td>
+                                    <td><?= htmlspecialchars($o['customer_phone']) ?></td>
+                                    <td><?= vnd($o['total_amount']) ?></td>
+                                    <td><span class="badge-status <?= $statusClass ?>"><?= htmlspecialchars($o['status']) ?></span></td>
+                                    <td><?= htmlspecialchars($o['created_at']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+    <?php elseif ($tab === 'customers'): ?>
+        <!-- TAB QUẢN LÝ KHÁCH HÀNG -->
+        <div class="card">
+            <div class="card-header">Danh sách khách hàng đã mua</div>
+            <div class="card-body p-0">
+                <?php if (!$customers): ?>
+                    <p class="p-3 text-secondary mb-0">Chưa có dữ liệu khách hàng.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table mb-0 align-middle">
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Khách hàng</th>
+                                <th>SĐT</th>
+                                <th>Địa chỉ</th>
+                                <th>Số đơn đã mua</th>
+                                <th>Tổng chi tiêu</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($customers as $i => $c): ?>
+                                <tr>
+                                    <td><?= $i+1 ?></td>
+                                    <td><?= htmlspecialchars($c['customer_name']) ?></td>
+                                    <td><?= htmlspecialchars($c['customer_phone']) ?></td>
+                                    <td><?= htmlspecialchars($c['customer_addr']) ?></td>
+                                    <td><?= (int)$c['total_orders'] ?></td>
+                                    <td><?= vnd($c['total_spent']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+    <?php elseif ($tab === 'tracking'): ?>
+        <!-- TAB THEO DÕI ĐƠN HÀNG -->
+        <div class="card">
+            <div class="card-header">Theo dõi đơn hàng gần đây</div>
+            <div class="card-body p-0">
+                <?php if (!$orderTimeline): ?>
+                    <p class="p-3 text-secondary mb-0">Chưa có đơn hàng.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table mb-0 align-middle">
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Mã đơn</th>
+                                <th>Khách hàng</th>
+                                <th>SĐT</th>
+                                <th>Tổng tiền</th>
+                                <th>Trạng thái</th>
+                                <th>Ngày tạo</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($orderTimeline as $i => $o):
+                                $statusClass = match($o['status']) {
+                                    'Đang xử lý'      => 'status-pending',
+                                    'Đã duyệt'        => 'status-approved',
+                                    'Đang giao'       => 'status-shipping',
+                                    'Đã giao'         => 'status-done',
+                                    'Đã hủy'          => 'status-cancel',
+                                    'Yêu cầu trả hàng'=> 'status-return-request',
+                                    'Đã trả hàng'     => 'status-return-done',
+                                    default           => 'status-pending'
+                                };
+                            ?>
+                                <tr>
+                                    <td><?= $i+1 ?></td>
+                                    <td><strong><?= htmlspecialchars($o['order_code']) ?></strong></td>
+                                    <td><?= htmlspecialchars($o['customer_name']) ?></td>
+                                    <td><?= htmlspecialchars($o['customer_phone']) ?></td>
+                                    <td><?= vnd($o['total_amount']) ?></td>
+                                    <td><span class="badge-status <?= $statusClass ?>"><?= htmlspecialchars($o['status']) ?></span></td>
+                                    <td><?= htmlspecialchars($o['created_at']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
     <?php endif; ?>
-
-    <div class="blockCard">
-        <h3><?php echo $editProduct['id'] ? "Sửa sản phẩm #".$editProduct['id'] : "Thêm sản phẩm mới"; ?></h3>
-
-        <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="action" value="save">
-            <input type="hidden" name="product_id" value="<?php echo htmlspecialchars($editProduct['id']); ?>">
-
-            <label>Tên sản phẩm</label>
-            <input type="text" name="name" required
-                   value="<?php echo htmlspecialchars($editProduct['name']); ?>">
-
-            <label>Thương hiệu</label>
-            <input type="text" name="brand"
-                   value="<?php echo htmlspecialchars($editProduct['brand']); ?>">
-
-            <label>Giá hiện tại</label>
-            <input type="number" step="1" min="0" name="price"
-                   value="<?php echo htmlspecialchars($editProduct['price']); ?>">
-
-            <label>Giá cũ</label>
-            <input type="number" step="1" min="0" name="old_price"
-                   value="<?php echo htmlspecialchars($editProduct['old_price']); ?>">
-
-            <label>Giảm %</label>
-            <input type="number" step="1" min="0" max="100" name="sale_percent"
-                   value="<?php echo htmlspecialchars($editProduct['sale_percent']); ?>">
-
-            <!-- DANH MỤC DẠNG CHECKBOX (chọn 1) -->
-            <label>Danh mục sản phẩm</label>
-            <div class="cat-group">
-                <label class="cat-item">
-                    <input
-                        type="checkbox"
-                        name="category"
-                        value="giay-the-thao-da"
-                        <?php echo ($editProduct['category'] === 'giay-the-thao-da') ? 'checked' : ''; ?>>
-                    Giày thể thao làm bằng da
-                </label>
-
-                <label class="cat-item">
-                    <input
-                        type="checkbox"
-                        name="category"
-                        value="giay-the-thao-da-tong-hop"
-                        <?php echo ($editProduct['category'] === 'giay-the-thao-da-tong-hop') ? 'checked' : ''; ?>>
-                    Giày thể thao làm bằng da tổng hợp
-                </label>
-
-                <label class="cat-item">
-                    <input
-                        type="checkbox"
-                        name="category"
-                        value="giay-the-thao-vai-cao-cap"
-                        <?php echo ($editProduct['category'] === 'giay-the-thao-vai-cao-cap') ? 'checked' : ''; ?>>
-                    Giày thể thao làm bằng vải cao cấp
-                </label>
-
-                <label class="cat-item">
-                    <input
-                        type="checkbox"
-                        name="category"
-                        value="hang-moi-ve"
-                        <?php echo ($editProduct['category'] === 'hang-moi-ve') ? 'checked' : ''; ?>>
-                    Hàng mới về
-                </label>
-            </div>
-
-            <label>Giới tính (ví dụ: nam, nữ, unisex)</label>
-            <input type="text" name="gender"
-                   value="<?php echo htmlspecialchars($editProduct['gender']); ?>">
-
-            <label>Chất liệu (ví dụ: da, vải, lưới)</label>
-            <input type="text" name="material"
-                   value="<?php echo htmlspecialchars($editProduct['material']); ?>">
-
-            <label>Màu sắc (ví dụ: đen, trắng, be, đỏ)</label>
-            <input type="text" name="color"
-                   value="<?php echo htmlspecialchars($editProduct['color']); ?>">
-
-            <label>Họa tiết (ví dụ: trơn, logo, phoi-mau)</label>
-            <input type="text" name="pattern"
-                   value="<?php echo htmlspecialchars($editProduct['pattern']); ?>">
-
-            <label>Size có sẵn</label>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="35" <?php echo checkedSize($current_sizes,'35'); ?>> 35
-            </div>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="36" <?php echo checkedSize($current_sizes,'36'); ?>> 36
-            </div>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="37" <?php echo checkedSize($current_sizes,'37'); ?>> 37
-            </div>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="38" <?php echo checkedSize($current_sizes,'38'); ?>> 38
-            </div>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="39" <?php echo checkedSize($current_sizes,'39'); ?>> 39
-            </div>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="40" <?php echo checkedSize($current_sizes,'40'); ?>> 40
-            </div>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="41" <?php echo checkedSize($current_sizes,'41'); ?>> 41
-            </div>
-            <div class="size-box">
-                <input type="checkbox" name="sizes[]" value="42" <?php echo checkedSize($current_sizes,'42'); ?>> 42
-            </div>
-
-            <label>Ảnh chính sản phẩm</label>
-            <?php if ($editProduct['image_main']): ?>
-                <img
-                  src="<?php echo htmlspecialchars($editProduct['image_main']); ?>"
-                  class="productImgPreview"
-                  alt="Ảnh sản phẩm">
-            <?php endif; ?>
-            <input type="file" name="image_main">
-            <input type="hidden" name="current_image" value="<?php echo htmlspecialchars($editProduct['image_main']); ?>">
-
-            <button type="submit" class="saveBtn">Lưu sản phẩm</button>
-        </form>
-    </div>
-
-    <!-- Danh sách sản phẩm của shop -->
-    <div class="blockCard">
-        <h3>Sản phẩm của shop</h3>
-        <table>
-            <thead>
-            <tr>
-                <th width="60">ID</th>
-                <th width="80">Ảnh</th>
-                <th>Tên</th>
-                <th width="90">Giá</th>
-                <th width="60">Sửa</th>
-            </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($allProducts as $p): ?>
-            <tr>
-                <td><?php echo htmlspecialchars($p['id']); ?></td>
-                <td>
-                    <?php if ($p['image_main']): ?>
-                      <img src="<?php echo htmlspecialchars($p['image_main']); ?>"
-                           style="max-width:60px;border:1px solid #ddd;border-radius:4px;">
-                    <?php endif; ?>
-                </td>
-                <td><?php echo htmlspecialchars($p['name']); ?></td>
-                <td><?php echo htmlspecialchars($p['price']); ?></td>
-                <td>
-                    <a href="seller_dashboard.php?edit_id=<?php echo urlencode($p['id']); ?>">Sửa</a>
-                </td>
-            </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-
-</div> <!-- /.page-wrapper -->
-
-<!-- overlay xác nhận đăng xuất -->
-<div id="logoutBox">
-    <div class="wrap">
-        <p>Bạn có muốn đăng xuất không?</p>
-        <button class="logoutBtn" id="confirmLogoutBtn">Có</button>
-        <button class="logoutBtn" id="cancelLogoutBtn">Không</button>
-    </div>
 </div>
-
-<script>
-function showLogout(){
-    document.getElementById('logoutBox').style.display='flex';
-}
-function hideLogout(){
-    document.getElementById('logoutBox').style.display='none';
-}
-
-document.getElementById('confirmLogoutBtn').addEventListener('click', function () {
-    window.location = 'seller_logout.php'; 
-});
-
-document.getElementById('cancelLogoutBtn').addEventListener('click', function () {
-    hideLogout();
-});
-
-// Chỉ cho phép chọn 1 danh mục (checkbox nhưng hành vi như radio)
-document.querySelectorAll('.cat-group input[type="checkbox"]').forEach(cb => {
-    cb.addEventListener('change', () => {
-        if (cb.checked) {
-            document.querySelectorAll('.cat-group input[type="checkbox"]').forEach(other => {
-                if (other !== cb) other.checked = false;
-            });
-        }
-    });
-});
-</script>
 
 </body>
 </html>

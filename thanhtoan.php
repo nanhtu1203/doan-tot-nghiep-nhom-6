@@ -1,8 +1,115 @@
 <?php
 // thanhtoan.php
+session_start();
+require 'connect.php';
+
+// ================== XỬ LÝ LƯU ĐƠN HÀNG (POST) ==================
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $mode      = $_POST['mode'] ?? 'cart';          // buyNow | cart
+    $fullname  = $_POST['fullname'] ?? '';
+    $phone     = $_POST['phone'] ?? '';
+    $address   = $_POST['address'] ?? '';
+    $payment   = $_POST['payment_method'] ?? 'cod';
+    $userId    = $_SESSION['user_id'] ?? null;      // để history.php lọc theo user
+
+    // Sinh mã đơn
+    $orderCode = 'HD' . strtoupper(substr(md5(uniqid('', true)), 0, 6));
+
+    // Lấy danh sách item
+    $items = [];
+
+    if ($mode === 'buyNow') {
+        // Mua ngay 1 sản phẩm
+        $name  = $_POST['name']  ?? 'Sản phẩm';
+        $price = (int)($_POST['price'] ?? 0);
+        $qty   = (int)($_POST['qty'] ?? 1);
+
+        $items[] = [
+            'name'  => $name,
+            'price' => $price,
+            'qty'   => $qty
+        ];
+    } else {
+        // Thanh toán giỏ hàng: items là JSON từ localStorage
+        $json = $_POST['items'] ?? '[]';
+        $decoded = json_decode($json, true);
+        if (is_array($decoded)) {
+            foreach ($decoded as $row) {
+                $items[] = [
+                    'name'  => $row['name']  ?? 'Sản phẩm',
+                    'price' => (int)($row['price'] ?? 0),
+                    'qty'   => (int)($row['qty'] ?? 1)
+                ];
+            }
+        }
+    }
+
+    // Tính tổng tiền
+    $totalAmount = 0;
+    foreach ($items as $it) {
+        $totalAmount += $it['price'] * $it['qty'];
+    }
+
+    if ($totalAmount <= 0 || empty($items)) {
+        // Không có sản phẩm, quay lại trang chủ
+        header('Location: trangchu.php');
+        exit;
+    }
+
+    // Lưu vào bảng orders
+    $stmt = $conn->prepare("
+        INSERT INTO orders (
+            order_code,
+            user_id,
+            customer_name,
+            customer_phone,
+            customer_addr,
+            total_amount,
+            status,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'Đang xử lý', NOW())
+    ");
+    $stmt->execute([
+        $orderCode,
+        $userId,
+        $fullname,
+        $phone,
+        $address,
+        $totalAmount
+    ]);
+    $orderId = $conn->lastInsertId();
+
+    // Lưu chi tiết sản phẩm vào order_items
+    // Ở đây chưa có product_id nên tạm để 0, mục đích chính là lưu được số lượng & giá
+    $stmtItem = $conn->prepare("
+        INSERT INTO order_items (order_id, product_id, quantity, price)
+        VALUES (?, ?, ?, ?)
+    ");
+    foreach ($items as $it) {
+        $stmtItem->execute([
+            $orderId,
+            0,                       // product_id tạm thời = 0
+            $it['qty'],
+            $it['price']
+        ]);
+    }
+
+    // Sau khi lưu xong, điều hướng theo phương thức thanh toán
+    if ($payment === 'bank') {
+        // Chuyển sang trang ngân hàng kèm theo mã đơn
+        header('Location: bank.php?order_code=' . urlencode($orderCode));
+    } else {
+        // Thanh toán COD: về trang lịch sử hoặc trang chủ tuỳ ý
+        header('Location: history.php?success=1');
+    }
+    exit;
+}
+
+// ================== GIAO DIỆN ==================
+
 
 // CASE 1: MUA NGAY 1 SẢN PHẨM
-// URL dạng: thanhtoan.php?buyNow=1&name=...&price=...&img=...
+// URL: thanhtoan.php?buyNow=1&name=...&price=...&img=...
 if (isset($_GET['buyNow']) && $_GET['buyNow'] == '1') {
     $name  = $_GET['name']  ?? 'Sản phẩm';
     $price = $_GET['price'] ?? 0;
@@ -49,7 +156,7 @@ if (isset($_GET['buyNow']) && $_GET['buyNow'] == '1') {
       <div class="card">
         <div class="card-header fw-semibold">Thông tin nhận hàng</div>
         <div class="card-body">
-          <form id="buyNowForm">
+          <form id="buyNowForm" method="post" action="thanhtoan.php">
             <!-- gửi lại sản phẩm -->
             <input type="hidden" name="name"  value="<?php echo htmlspecialchars($name); ?>">
             <input type="hidden" name="price" value="<?php echo htmlspecialchars($price); ?>">
@@ -88,31 +195,13 @@ if (isset($_GET['buyNow']) && $_GET['buyNow'] == '1') {
       </div>
     </div>
 
-    <script>
-    // xử lý submit: nếu chọn chuyển khoản thì sang trang ngân hàng, ngược lại báo thành công và về trang chủ
-    document.getElementById('buyNowForm').addEventListener('submit', function(e){
-      e.preventDefault();
-
-      const method = this.payment_method.value;
-
-      if (method === 'bank') {
-        // chuyển sang trang thanh toán ngân hàng
-        window.location.href = 'bank.php';
-      } else {
-        alert('Đặt hàng thành công');
-        window.location.href = 'trangchu.php';
-      }
-    });
-    </script>
-
     </body>
     </html>
     <?php
     exit;
 }
 
-// CASE 2: THANH TOÁN GIỎ HÀNG
-// Không có buyNow => checkout toàn bộ giỏ bằng JS đọc localStorage
+// CASE 2: THANH TOÁN TOÀN BỘ GIỎ HÀNG
 ?>
 <!doctype html>
 <html lang="vi">
@@ -146,7 +235,7 @@ if (isset($_GET['buyNow']) && $_GET['buyNow'] == '1') {
   <div class="card">
     <div class="card-header fw-semibold">Thông tin nhận hàng</div>
     <div class="card-body">
-      <form id="cartCheckoutForm">
+      <form id="cartCheckoutForm" method="post" action="thanhtoan.php">
         <input type="hidden" name="mode" value="cart">
         <input type="hidden" name="items" id="cartItemsInput">
 
@@ -220,26 +309,8 @@ if (cartData.length === 0) {
 
 totalEl.textContent = nf(total);
 
-// Đưa toàn bộ giỏ vào input hidden dưới dạng JSON để sau này gửi server nếu cần
+// Gửi toàn bộ giỏ vào input hidden dưới dạng JSON
 hiddenInput.value = JSON.stringify(cartData);
-
-// handle submit thanh toán giỏ
-document.getElementById('cartCheckoutForm').addEventListener('submit', function(e){
-  e.preventDefault();
-
-  const method = this.payment_method.value;
-
-  if (method === 'bank') {
-    // xóa giỏ hàng trước khi sang trang ngân hàng
-    localStorage.removeItem('cart');
-    // qua trang thanh toán ngân hàng
-    window.location.href = 'bank.php';
-  } else {
-    alert('Đặt hàng thành công');
-    localStorage.removeItem('cart');
-    window.location.href = 'trangchu.php';
-  }
-});
 </script>
 
 </body>

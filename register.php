@@ -1,12 +1,27 @@
 <?php
 require 'connect.php';
 
-// biến trạng thái để báo ra UI
 $successMsg = "";
 $errorMsg   = "";
 
-// nếu user bấm submit form (POST)
+/* Gửi email xác minh */
+function sendVerificationEmail($toEmail, $code) {
+    $subject = "Xac minh tai khoan cua ban";
+
+    $verifyLink = "http://localhost/doantotnghiep/php/verify.php?email="
+                . urlencode($toEmail) . "&code=" . urlencode($code);
+
+    $message  = "Chao ban,\n\n";
+    $message .= "Ma xac minh cua ban la: $code \n";
+    $message .= "Hoac mo link sau de xac minh:\n$verifyLink\n\n";
+
+    $headers = "From: no-reply@yourdomain.com\r\n";
+    return @mail($toEmail, $subject, $message, $headers);
+}
+
+/* ----------------- XỬ LÝ ĐĂNG KÝ ----------------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
     $fullname = trim($_POST['fullname'] ?? '');
     $email    = trim($_POST['email'] ?? '');
     $password = trim($_POST['password'] ?? '');
@@ -14,21 +29,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($fullname === '' || $email === '' || $password === '') {
         $errorMsg = "Vui lòng nhập đầy đủ thông tin.";
     } else {
-        // kiểm tra email đã tồn tại chưa
-        $check = $conn->prepare("SELECT id FROM users WHERE email = ?");
+
+        // CHECK EMAIL TỒN TẠI TRONG users_id
+        $check = $conn->prepare("SELECT id FROM users_id WHERE email = ?");
         $check->execute([$email]);
+
         if ($check->fetch()) {
             $errorMsg = "Email đã tồn tại. Vui lòng dùng email khác.";
         } else {
-            // hash mật khẩu
             $hash = password_hash($password, PASSWORD_DEFAULT);
+            $verificationCode = random_int(100000, 999999);
 
-            // lưu vào DB
-            $ins = $conn->prepare("INSERT INTO users (fullname, email, password_hash) VALUES (?, ?, ?)");
-            $ins->execute([$fullname, $email, $hash]);
+            // INSERT USER VÀO users_id
+            $ins = $conn->prepare("
+                INSERT INTO users_id (fullname, email, password_hash, verification_code, is_verified)
+                VALUES (?, ?, ?, ?, 0)
+            ");
 
-            // báo thành công
-            $successMsg = "Đăng ký tài khoản thành công. Bạn có thể đăng nhập ngay.";
+            $ok = $ins->execute([$fullname, $email, $hash, $verificationCode]);
+
+            if ($ok) {
+
+                // LOCALHOST – show mã xác minh
+                if ($_SERVER['SERVER_NAME'] === 'localhost') {
+
+                    $link = "http://localhost/doantotnghiep/php/verify.php?email=" 
+                          . urlencode($email) . "&code=" . urlencode($verificationCode);
+
+                    $successMsg  = "Đăng ký thành công.<br>";
+                    $successMsg .= "Mã xác minh: <strong>" . $verificationCode . "</strong><br>";
+                    $successMsg .= "Link xác minh:<br><a href=\"$link\">$link</a>";
+
+                } else {
+                    // HOST THẬT
+                    if (sendVerificationEmail($email, $verificationCode)) {
+                        $successMsg = "Đăng ký thành công. Vui lòng kiểm tra email để xác minh.";
+                    } else {
+                        $successMsg = "Đăng ký thành công, nhưng không gửi được email xác minh.";
+                    }
+                }
+            } else {
+                $errorMsg = "Có lỗi xảy ra. Vui lòng thử lại.";
+            }
         }
     }
 }
@@ -46,19 +88,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="container py-5" style="max-width:400px">
   <h3 class="text-center mb-3">Tạo tài khoản</h3>
 
-  <?php if ($errorMsg !== ""): ?>
-    <div class="alert alert-danger py-2 small text-center">
-      <?php echo htmlspecialchars($errorMsg); ?>
-    </div>
+  <?php if ($errorMsg): ?>
+    <div class="alert alert-danger text-center"><?php echo $errorMsg; ?></div>
   <?php endif; ?>
 
-  <?php if ($successMsg !== ""): ?>
-    <div class="alert alert-success py-2 small text-center">
-      <?php echo htmlspecialchars($successMsg); ?>
-    </div>
+  <?php if ($successMsg): ?>
+    <div class="alert alert-success text-center"><?php echo $successMsg; ?></div>
   <?php endif; ?>
 
   <form method="post" class="card p-3 shadow-sm">
+
     <div class="mb-3">
       <label class="form-label">Họ và tên</label>
       <input type="text" name="fullname" class="form-control" required>
@@ -79,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="text-center small mt-3">
       Đã có tài khoản? <a href="login.php">Đăng nhập</a>
     </div>
+
   </form>
 </div>
 

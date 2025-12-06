@@ -2,42 +2,81 @@
 session_start();
 require 'connect.php';
 
-// ====== XỬ LÝ ĐẶT HÀNG (KHÁCH HÀNG ĐẶT TỪ GIỎ MINI) ======
+// ====== XỬ LÝ ĐẶT HÀNG (KHÁCH HÀNG ĐẶT TỪ GIỎ MINI / THANHTOAN) ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
-    $customerName    = $_POST['name'] ?? '';
-    $customerPhone   = $_POST['phone'] ?? '';
+    $customerName    = $_POST['name']    ?? '';
+    $customerPhone   = $_POST['phone']   ?? '';
     $customerAddress = $_POST['address'] ?? '';
 
     // Sinh mã đơn hàng ngẫu nhiên
-    $orderCode = 'HD' . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6));
+    $orderCode = 'HD' . strtoupper(substr(md5(uniqid('', true)), 0, 6));
 
-    // Lấy giỏ hàng từ session (giả sử lưu ở đây)
+    // Lấy user_id đang đăng nhập (nếu có) để liên kết với lịch sử mua hàng
+    $userId = $_SESSION['user_id'] ?? null;
+
+    // Lấy giỏ hàng từ session (phải có chỗ khác trong code set $_SESSION['cart'])
     $cart = $_SESSION['cart'] ?? [];
 
     if (!empty($cart)) {
-        // Lưu đơn hàng chính
-        $stmt = $conn->prepare("INSERT INTO orders (order_code, customer_name, customer_phone, customer_addr, created_at) 
-                                VALUES (?, ?, ?, ?, NOW())");
-        $stmt->execute([$orderCode, $customerName, $customerPhone, $customerAddress]);
-        $orderId = $conn->lastInsertId();
-
-        // Lưu chi tiết sản phẩm
+        // Tính tổng tiền đơn hàng
+        $totalAmount = 0;
         foreach ($cart as $productId => $item) {
-            $stmt2 = $conn->prepare("INSERT INTO order_items (order_id, product_id, quantity, price)
-                                     VALUES (?, ?, ?, ?)");
-            $stmt2->execute([$orderId, $productId, $item['qty'], $item['price']]);
+            $qty   = (int)($item['qty']   ?? 0);
+            $price = (int)($item['price'] ?? 0);
+            $totalAmount += $qty * $price;
         }
 
-        // clear cart
+        // Lưu đơn hàng vào bảng orders (đúng với cấu trúc bạn vừa tạo)
+        // id, order_code, user_id, customer_name, customer_phone, customer_addr,
+        // total_amount, status, created_at
+        $stmt = $conn->prepare("
+            INSERT INTO orders (
+                order_code,
+                user_id,
+                customer_name,
+                customer_phone,
+                customer_addr,
+                total_amount,
+                status,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'Đang xử lý', NOW())
+        ");
+        $stmt->execute([
+            $orderCode,
+            $userId,
+            $customerName,
+            $customerPhone,
+            $customerAddress,
+            $totalAmount
+        ]);
+
+        $orderId = $conn->lastInsertId();
+
+        // Lưu chi tiết sản phẩm vào order_items
+        foreach ($cart as $productId => $item) {
+            $stmt2 = $conn->prepare("
+                INSERT INTO order_items (order_id, product_id, quantity, price)
+                VALUES (?, ?, ?, ?)
+            ");
+            $stmt2->execute([
+                $orderId,
+                $productId,
+                (int)$item['qty'],
+                (int)$item['price']
+            ]);
+        }
+
+        // Xóa giỏ hàng trong session
         unset($_SESSION['cart']);
 
-        // chuyển cho người bán xem đơn
+        // Chuyển cho người bán xem đơn, tuỳ bạn muốn redirect đi đâu
         header("Location: seller.php?order_code=" . urlencode($orderCode));
         exit;
     }
 }
 
-// ====== LẤY SẢN PHẨM TỪ DATABASE ĐỂ HIỂN THỊ NGOÀI TRANG CHỦ ======
+
+
 $category = $_GET['category'] ?? '';
 
 if ($category !== '') {
@@ -78,164 +117,52 @@ function vnd($n){
 
   <!-- CSS của em -->
   <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/csstrangchu.css">
 
-  <!-- Thêm CSS nhỏ để xử lý ẩn theo filter/search -->
-  <style>
-    .product-card[data-hide-search="1"],
-    .product-card[data-hide-filter="1"] {
-      display: none !important;
-    }
+<style>
+  /* BIẾN DROPDOWN CỦA BOOTSTRAP THÀNH HOVER-MENU */
 
-    /* mini cart box */
-    #miniCartBox{
-      position: fixed;
-      right: 16px;
-      bottom: 16px;
-      width: 320px;
-      max-height: 80vh;
-      background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      box-shadow: 0 20px 40px rgba(0,0,0,.15);
-      display: none;
-      flex-direction: column;
-      z-index: 9999;
-      font-size: 14px;
-    }
-    #miniCartBox .mini-header{
-      padding:12px 16px;
-      border-bottom:1px solid #eee;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      font-weight:600;
-    }
-    #miniCartBox .mini-header button{
-      border:0;
-      background:#eee;
-      border-radius:6px;
-      font-size:12px;
-      padding:4px 8px;
-    }
-    #miniCartBox .mini-body{
-      padding:12px 16px;
-      flex:1;
-      min-height:80px;
-      max-height:300px;
-      overflow-y:auto;
-    }
-    .mini-item{
-      display:flex;
-      gap:10px;
-      align-items:flex-start;
-      border-bottom:1px solid #f3f3f3;
-      padding-bottom:10px;
-      margin-bottom:10px;
-    }
-    .mini-thumb img{
-      width:44px;
-      height:44px;
-      object-fit:cover;
-      border-radius:6px;
-      border:1px solid #eee;
-    }
-    .mini-info{
-      flex:1;
-      min-width:0;
-    }
-    .mini-name{
-      font-weight:500;
-      line-height:1.3;
-    }
-    .mini-row1{
-      font-size:13px;
-      color:#444;
-    }
-    .mini-row2{
-      font-size:13px;
-      color:#666;
-      margin-top:4px;
-    }
-    .qty-wrap{
-      display:flex;
-      align-items:center;
-      gap:4px;
-    }
-    .qty-btn{
-      border:1px solid #ccc;
-      background:#fff;
-      border-radius:4px;
-      padding:0 6px;
-      line-height:18px;
-      font-size:12px;
-    }
-    .mini-side{
-      text-align:right;
-      min-width:70px;
-    }
-    .mini-lineprice{
-      font-weight:600;
-      font-size:13px;
-    }
-    .remove-item-btn{
-      border:0;
-      background:#ffefef;
-      color:#d00000;
-      border-radius:4px;
-      font-size:12px;
-      line-height:16px;
-      padding:2px 6px;
-      margin-top:4px;
-    }
-    #miniCartBox .mini-footer{
-      border-top:1px solid #eee;
-      padding:12px 16px;
-    }
-    .mini-totalline{
-      display:flex;
-      justify-content:space-between;
-      font-size:14px;
-      font-weight:600;
-      margin-bottom:10px;
-    }
-    .mini-actions{
-      display:flex;
-      gap:8px;
-    }
-    .mini-clear-btn{
-      flex:1;
-      background:#fff;
-      border:1px solid #dc3545;
-      color:#dc3545;
-      border-radius:6px;
-      font-size:13px;
-      padding:6px 8px;
-    }
-    .mini-pay-btn{
-      flex:1;
-      background:#000;
-      border:0;
-      color:#fff;
-      border-radius:6px;
-      font-size:13px;
-      padding:6px 8px;
-    }
+.nav-item.dropdown:hover .dropdown-menu {
+    display: block;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
 
-    #miniToast{
-      position:fixed;
-      right:16px;
-      bottom:16px;
-      background:#198754;
-      color:#fff;
-      font-size:14px;
-      padding:10px 14px;
-      border-radius:6px;
-      box-shadow:0 10px 30px rgba(0,0,0,.2);
-      display:none;
-      z-index:10000;
-      font-weight:500;
-    }
-  </style>
+/* Ẩn mặc định */
+.dropdown-menu {
+    display: block;              /* CHO PHÉP transition */
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(10px);
+    transition: all 0.25s ease;
+    margin-top: 0;               /* tránh bị lệch khi hover */
+    border-radius: 10px;
+    padding: 15px 20px;
+    border: 1px solid #e5e5e5;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+}
+
+/* Từng item */
+.dropdown-menu .dropdown-item {
+    font-size: 14px;
+    padding: 8px 10px;
+    transition: 0.25s;
+}
+
+.dropdown-menu .dropdown-item:hover {
+    background: #f5f5f5;
+    color: #ff5a00;
+    transform: translateX(4px);
+}
+
+/* Divider đẹp hơn */
+.dropdown-divider {
+    margin: 6px 0;
+    border-color: #ddd;
+}
+
+</style>
   
 </head>
 
@@ -249,12 +176,7 @@ function vnd($n){
     <div class="d-none d-lg-flex gap-4">
       <span>Hotline: <b>0789.888.666</b></span>
 
-      <button id="logoutBtn" class="auth-link">
-        Đăng xuất
-      </button>
-
       <a href="#" class="auth-link">Tin tức</a>
-      <a href="../php/track_order.php" class="auth-link">Tra cứu đơn hàng</a>
       <a href="#" class="auth-link">Hướng dẫn chọn size</a>
     </div>
   </div>
@@ -264,7 +186,7 @@ function vnd($n){
 <nav class="navbar navbar-expand-lg border-bottom bg-white">
   <div class="container">
     <a class="navbar-brand logo d-flex align-items-center" href="#">
-      <i class="bi bi-triangle-fill me-2"></i>THẾ GIỚI Giày Thể Thao Adodas
+      <i class="bi bi-triangle-fill me-2"></i> Giày Thể Thao Adodas
     </a>
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
@@ -287,17 +209,17 @@ function vnd($n){
 
             <li>
               <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-da">
-                GIÀY THỂ THAO LÀM BẰNG DA
+                BẰNG DA
               </a>
             </li>
             <li>
               <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-da-tong-hop">
-                GIÀY THỂ THAO LÀM BẰNG DA TỔNG HỢP
+                BẰNG DA TỔNG HỢP
               </a>
             </li>
             <li>
               <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-vai-cao-cap">
-                GIÀY THỂ THAO LÀM BẰNG VẢI CAO CẤP
+                BẰNG VẢI CAO CẤP
               </a>
             </li>
             <li>
@@ -307,6 +229,21 @@ function vnd($n){
             </li>
           </ul>
         </li>
+          <li class="nav-item dropdown">
+      <a class="nav-link dropdown-toggle" href="#" id="brandMenu" role="button">
+        THƯƠNG HIỆU
+      </a>
+      <ul class="dropdown-menu" aria-labelledby="brandMenu">
+        <li><a class="dropdown-item" href="trangchu.php?brand=nike">Nike</a></li>
+        <li><a class="dropdown-item" href="trangchu.php?brand=adidas">Adidas</a></li>
+        <li><a class="dropdown-item" href="trangchu.php?brand=puma">Puma</a></li>
+        <li><a class="dropdown-item" href="trangchu.php?brand=newbalance">New Balance</a></li>
+        <li><a class="dropdown-item" href="trangchu.php?brand=asic">Asics</a></li>
+        <li><a class="dropdown-item" href="trangchu.php?brand=converse">Converse</a></li>
+        <li><a class="dropdown-item" href="trangchu.php?brand=vans">Vans</a></li>
+        <li><a class="dropdown-item" href="trangchu.php?brand=dior">Dior</a></li>
+      </ul>
+    </li>
       </ul>
 
       <div class="d-flex align-items-center gap-2">
@@ -320,43 +257,129 @@ function vnd($n){
           <i class="bi bi-bag fs-4"></i>
           <span class="badge bg-danger">2</span>
         </a>
+        <div class="user-menu-container position-relative">
+
+            <div id="userIcon" class="icon-wrap" style="cursor:pointer;">
+                <svg class="icon" viewBox="0 0 24 24">
+                    <circle cx="12" cy="7" r="4"></circle>
+                    <path d="M4 20c0-4 4-7 8-7s8 3 8 7"></path>
+                </svg>
+            </div>
+
+            <div id="userDropdown" class="user-dropdown">
+                <a href="profile.php">Thông tin tài khoản</a>
+                <a href="history.php">Lịch sử mua hàng</a>
+                <a href="track_order.php">Tra cứu đơn hàng</a>
+                <a href="address.php">Thay đổi địa chỉ</a>
+                <a href="#" id="logoutFromMenu">Đăng xuất</a>
+            </div>
+
+        </div>
+
+
       </div>
     </div>
   </div>
 </nav>
 
-<!-- BREADCRUMB -->
-<div class="container">
-  <nav class="breadcrumb-wrap" aria-label="breadcrumb">
-    <ol class="breadcrumb small mb-2">
-      <li class="breadcrumb-item"><a href="#">Trang chủ</a></li>
-      <li class="breadcrumb-item"><a href="#">Thể Thao</a></li>
-      <li class="breadcrumb-item active">Giày Thể Thao</li>
-    </ol>
-  </nav>
-</div>
-
 <!-- HEADER + TAGLINE -->
 <section class="container">
-  <div class="d-flex flex-wrap align-items-end gap-3">
-    <div>
-      <h2 class="fw-bold mb-0">GIÀY THỂ THAO ADODAS</h2>
-      <small class="text-muted">(Sản phẩm mới nhất)</small>
-      <p class="small text-muted mt-1 mb-0">
-        Giày Thể Thao chính hãng ✓ Giá tốt ✓ Đổi trả 15 ngày ✓ FREESHIP ✓ Ưu Đãi Online
-      </p>
+
+<!-- BANNER CHUYỂN ẢNH KIỂU ADIDAS -->
+<div id="bannerSlide"
+     class="carousel slide carousel-fade mt-3"
+     data-bs-ride="carousel"
+     data-bs-interval="3000"
+     data-bs-pause="false"
+     data-bs-wrap="true">
+
+  <div class="carousel-inner">
+
+    <!-- SLIDE 1 -->
+    <div class="carousel-item active">
+      <div class="hero-slide">
+        <div class="hero-slide-inner">
+          <div class="hero-img-wrap">
+            <img src="../images/baner1.png" alt="Giày thể thao giảm giá">
+          </div>
+          <div class="hero-content">
+            <div class="hero-kicker">BLACK FRIDAY</div>
+            <div class="hero-title">
+              <span>UP TO</span>
+              <span>60%</span>
+              <span>OFF</span>
+            </div>
+            <div class="hero-sub">
+              New styles added. Ưu đãi lớn cho giày thể thao Adodas, số lượng có hạn.
+            </div>
+            <div class="hero-cta-row">
+              <a href="trangchu.php?category=men" class="btn btn-light">Men →</a>
+              <a href="trangchu.php?category=women" class="btn btn-light">Women →</a>
+              <a href="trangchu.php?category=kids" class="btn btn-light">Kids →</a>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="ms-auto">
-      <select id="sortSelect" class="form-select form-select-sm w-auto">
-        <option value="">Sắp xếp</option>
-        <option value="price-asc">Giá tăng dần</option>
-        <option value="price-desc">Giá giảm dần</option>
-        <option value="newest">Mới nhất</option>
-        <option value="bestseller">Bán chạy</option>
-      </select>
+    <!-- SLIDE 2 -->
+    <div class="carousel-item">
+      <div class="hero-slide">
+        <div class="hero-slide-inner">
+          <div class="hero-img-wrap">
+            <img src="../images/baner2.png" alt="Bộ sưu tập mới">
+          </div>
+          <div class="hero-content">
+            <div class="hero-kicker">NEW ARRIVALS</div>
+            <div class="hero-title">
+              <span>GIÀY</span>
+              <span>MÙA ĐÔNG</span>
+            </div>
+            <div class="hero-sub">
+              Chống trơn trượt, êm chân, giữ ấm tốt – ready cho mọi cuộc vui cuối năm.
+            </div>
+            <div class="hero-cta-row">
+              <a href="trangchu.php?category=hang-moi-ve" class="btn btn-light">Shop now →</a>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <!-- SLIDE 3 – DUP / TÙY Ý -->
+    <div class="carousel-item">
+      <div class="hero-slide">
+        <div class="hero-slide-inner">
+          <div class="hero-img-wrap">
+            <img src="../images/baner3.png" alt="Best seller">
+          </div>
+          <div class="hero-content">
+            <div class="hero-kicker">BEST SELLERS</div>
+            <div class="hero-title">
+              <span>TOP</span>
+              <span>PICKS</span>
+            </div>
+            <div class="hero-sub">
+              Những mẫu được săn nhiều nhất tháng, nhanh tay kẻo hết size.
+            </div>
+            <div class="hero-cta-row">
+              <a href="trangchu.php" class="btn btn-light">Xem tất cả →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
+
+  <button class="carousel-control-prev" type="button" data-bs-target="#bannerSlide" data-bs-slide="prev">
+    <span class="carousel-control-prev-icon"></span>
+  </button>
+  <button class="carousel-control-next" type="button" data-bs-target="#bannerSlide" data-bs-slide="next">
+    <span class="carousel-control-next-icon"></span>
+  </button>
+
+</div>
 
   <!-- FILTER BAR -->
   <div class="filterbar mt-3 d-flex flex-wrap gap-2">
@@ -480,50 +503,18 @@ function vnd($n){
         <button id="applyPrice" class="btn btn-sm btn-dark w-100 mt-2">Áp dụng</button>
       </div>
     </div>
-
-  </div>
-
-  <!-- Banner chuyển ảnh liên tục 2s -->
-  <div id="bannerSlide"
-       class="carousel slide"
-       data-bs-ride="carousel"
-       data-bs-interval="2000"
-       data-bs-pause="false"
-       data-bs-wrap="true">
-
-    <div class="carousel-inner">
-      <div class="carousel-item active">
-        <img src="../images/anh1.jpg"
-             class="d-block w-100" alt="Banner 1">
-      </div>
-
-      <div class="carousel-item">
-        <img src="../images/anh2.jpg"
-             class="d-block w-100" alt="Banner 2">
-      </div>
-
-      <div class="carousel-item">
-        <img src="../images/anh3.jpg"
-             class="d-block w-100" alt="Banner 3">
-      </div>
-
-      <div class="carousel-item">
-        <img src="../images/anh4.jpg"
-             class="d-block w-100" alt="Banner 4">
-      </div>
+        <div class="ms-auto">
+      <select id="sortSelect" class="form-select form-select-sm w-auto">
+        <option value="">Sắp xếp</option>
+        <option value="price-asc">Giá tăng dần</option>
+        <option value="price-desc">Giá giảm dần</option>
+        <option value="newest">Mới nhất</option>
+        <option value="bestseller">Bán chạy</option>
+      </select>
     </div>
-
-    <!-- Nút chuyển trái/phải (nếu cần) -->
-    <button class="carousel-control-prev" type="button" data-bs-target="#bannerSlide" data-bs-slide="prev">
-      <span class="carousel-control-prev-icon"></span>
-      <span class="visually-hidden">Previous</span>
-    </button>
-
-    <button class="carousel-control-next" type="button" data-bs-target="#bannerSlide" data-bs-slide="next">
-      <span class="carousel-control-next-icon"></span>
-      <span class="visually-hidden">Next</span>
-    </button>
   </div>
+  </div>
+
 
 </section>
 
@@ -545,6 +536,8 @@ function vnd($n){
     <div class="col-6 col-md-4 col-lg-3">
       <div
         class="card product-card position-relative"
+        data-id="<?php echo $p['id']; ?>"
+        data-name="<?php echo htmlspecialchars($p['name']); ?>"
         data-name="<?php echo htmlspecialchars($p['name']); ?>"
         data-category="<?php echo htmlspecialchars($p['category']); ?>"
         data-gender="<?php echo htmlspecialchars($p['gender']); ?>"
@@ -695,27 +688,27 @@ function vnd($n){
         </div>
       `;
 
-      row.querySelector('.minus').addEventListener('click', () => {
-        if (cart[idx].qty > 1) {
-          cart[idx].qty -= 1;
-        } else {
-          cart.splice(idx,1);
-        }
-        saveCart();
-        renderCart();
-      });
+        // NÚT TRỪ SỐ LƯỢNG
+        row.querySelector('.minus').addEventListener('click', () => {
+            cart[idx].qty = Math.max(1, cart[idx].qty - 1);  
+            saveCart();
+            renderCart();
+        });
 
-      row.querySelector('.plus').addEventListener('click', () => {
-        cart[idx].qty += 1;
-        saveCart();
-        renderCart();
-      });
+        // NÚT CỘNG SỐ LƯỢNG
+        row.querySelector('.plus').addEventListener('click', () => {
+            cart[idx].qty += 1;
+            saveCart();
+            renderCart();
+        });
 
-      row.querySelector('.remove-item-btn').addEventListener('click', () => {
-        cart.splice(idx,1);
-        saveCart();
-        renderCart();
-      });
+        // NÚT XOÁ SẢN PHẨM
+        row.querySelector('.remove-item-btn').addEventListener('click', () => {
+            cart.splice(idx, 1);
+            saveCart();
+            renderCart();
+        });
+
 
       miniList.appendChild(row);
     });
@@ -1003,7 +996,6 @@ function vnd($n){
 <!-- SCRIPT: SEARCH -->
 <script>
 (function(){
-  // Hàm bỏ dấu tiếng Việt để so khớp
   function normalize(str){
     return (str || '')
       .toLowerCase()
@@ -1017,7 +1009,6 @@ function vnd($n){
   const productCards  = Array.from(document.querySelectorAll('.product-card'));
   const gridSection   = document.querySelector('section.container.py-3');
 
-  // Hiện / ẩn message "Không tìm thấy..."
   function toggleNoResultSearch(isEmpty){
     let msgEl = document.getElementById('noResultSearch');
     if (isEmpty){
@@ -1040,23 +1031,18 @@ function vnd($n){
     let visibleCount = 0;
 
     productCards.forEach(card => {
-      // Lấy tên sản phẩm từ data-name (ưu tiên) hoặc từ .card-title
       const rawName =
         card.getAttribute('data-name') ||
         (card.querySelector('.card-title')?.textContent || '');
 
       const match = kw === '' ? true : normalize(rawName).includes(kw);
 
-      // Nếu không khớp keyword và keyword không rỗng → ẩn theo search
       if (!match && kw !== ''){
         card.setAttribute('data-hide-search','1');
       } else {
-        // khớp hoặc ô tìm kiếm đang rỗng → bỏ cờ ẩn search
         card.removeAttribute('data-hide-search');
       }
 
-      // Đếm số sp vẫn đang hiển thị:
-      // chỉ tính nếu nó không bị ẩn bởi filter và cũng không bị ẩn bởi search
       if (!card.hasAttribute('data-hide-filter') &&
           !card.hasAttribute('data-hide-search')){
         visibleCount++;
@@ -1066,17 +1052,13 @@ function vnd($n){
     toggleNoResultSearch(visibleCount === 0);
   }
 
-  // Gõ Enter là tìm
   inputSearch.addEventListener('keydown', e => {
     if (e.key === 'Enter'){
       runSearch();
     }
   });
 
-  // Bấm icon kính lúp là tìm
   btnSearch.addEventListener('click', runSearch);
-
-  // Gõ tới đâu lọc realtime tới đó
   inputSearch.addEventListener('input', runSearch);
 })();
 </script>
@@ -1105,6 +1087,47 @@ function vnd($n){
   };
 })();
 </script>
+<script>
+// Toggle menu
+document.getElementById("userIcon").onclick = function(e) {
+    e.stopPropagation();
+    const box = document.getElementById("userDropdown");
+    box.style.display = box.style.display === "block" ? "none" : "block";
+};
+
+// Ấn ra ngoài để đóng menu
+document.addEventListener("click", function () {
+    const box = document.getElementById("userDropdown");
+    box.style.display = "none";
+});
+
+// Đăng xuất trong menu
+document.getElementById("logoutFromMenu").onclick = function(e){
+    e.preventDefault();
+    fetch("logout.php")
+        .then(() => window.location.href = "login.php?message=Đăng xuất thành công");
+        
+};
+
+</script>
+<script>
+// CLICK CẢ SẢN PHẨM → SANG TRANG CHI TIẾT
+document.querySelectorAll('.product-card').forEach(card => {
+    card.addEventListener('click', function() {
+        const id = this.dataset.id;
+        if (id) {
+            window.location.href = "product_detail.php?id=" + id;
+        }
+    });
+});
+
+// NGĂN 2 NÚT (THÊM GIỎ / MUA NGAY) GÂY CLICK VÀO SẢN PHẨM
+document.querySelectorAll('.btn-add-cart-auto, .btn-buy-now-auto')
+.forEach(btn => {
+    btn.addEventListener('click', e => e.stopPropagation());
+});
+</script>
+
 
 </body>
 </html>
