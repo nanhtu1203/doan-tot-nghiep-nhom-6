@@ -109,7 +109,7 @@
           <input class="form-check-input filter-category" type="checkbox" value="chay-bo"> Chạy Bộ
         </label>
         <label class="form-check">
-          <input class="form-check-input filter-category" type="checkbox" value="sneaker"> Sneaker
+          <input class="form-check-input filter-category" type="checkbox" value="Adodas"> Adodas
         </label>
         <label class="form-check">
           <input class="form-check-input filter-category" type="checkbox" value="the-thao"> Thể Thao

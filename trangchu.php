@@ -79,24 +79,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
 
 $category = $_GET['category'] ?? '';
 
-if ($category !== '') {
-    $stmtProd = $conn->prepare("
-        SELECT id, name, brand, price, old_price, sale_percent, category, gender, material, color, pattern, sizes, image_main
-        FROM products
-        WHERE category = ?
-        ORDER BY id DESC
-    ");
-    $stmtProd->execute([$category]);
-} else {
-    $stmtProd = $conn->prepare("
-        SELECT id, name, brand, price, old_price, sale_percent, category, gender, material, color, pattern, sizes, image_main
-        FROM products
-        ORDER BY id DESC
-    ");
-    $stmtProd->execute();
+// Lọc nâng cao
+$where = [];
+$params = [];
+if (!empty($_GET['category'])) {
+    $where[] = 'category = ?';
+    $params[] = $_GET['category'];
 }
-
+if (!empty($_GET['brand'])) {
+    $where[] = 'brand = ?';
+    $params[] = $_GET['brand'];
+}
+if (!empty($_GET['color'])) {
+    $where[] = 'color = ?';
+    $params[] = $_GET['color'];
+}
+if (!empty($_GET['price_min'])) {
+    $where[] = 'price >= ?';
+    $params[] = $_GET['price_min'];
+}
+if (!empty($_GET['price_max'])) {
+    $where[] = 'price <= ?';
+    $params[] = $_GET['price_max'];
+}
+$whereSQL = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+$perPage = 12;
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$offset = ($page - 1) * $perPage;
+// Đếm tổng số sản phẩm
+$sqlCount = "SELECT COUNT(*) FROM products $whereSQL";
+$countStmt = $conn->prepare($sqlCount);
+$countStmt->execute($params);
+$totalProducts = $countStmt->fetchColumn();
+$totalPages = ceil($totalProducts / $perPage);
+// Lấy danh sách sản phẩm
+$sql = "SELECT id, name, brand, price, old_price, sale_percent, category, gender, material, color, pattern, sizes, image_main FROM products $whereSQL ORDER BY id DESC LIMIT $perPage OFFSET $offset";
+$stmtProd = $conn->prepare($sql);
+$stmtProd->execute($params);
 $products = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
+
+// Thêm sau dòng kết nối DB
+$stmtCat = $conn->query("SELECT id, name, slug FROM categories ORDER BY sort_order, name");
+$categories = $stmtCat->fetchAll(PDO::FETCH_ASSOC);
 
 // helper format giá kiểu 290.000₫
 function vnd($n){
@@ -109,7 +133,7 @@ function vnd($n){
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Giày Thể Thao Adodas</title>
+  <title>Adodas – Adodas, Quần Áo, Phụ Kiện Thời Trang chính hãng</title>
 
   <!-- Bootstrap + Icons -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -121,7 +145,6 @@ function vnd($n){
 
 <style>
   /* BIẾN DROPDOWN CỦA BOOTSTRAP THÀNH HOVER-MENU */
-
 .nav-item.dropdown:hover .dropdown-menu {
     display: block;
     opacity: 1;
@@ -131,13 +154,13 @@ function vnd($n){
 
 /* Ẩn mặc định */
 .dropdown-menu {
-    display: block;              /* CHO PHÉP transition */
+    display: block;
     opacity: 0;
     visibility: hidden;
     transform: translateY(10px);
     transition: all 0.25s ease;
-    margin-top: 0;               /* tránh bị lệch khi hover */
-    border-radius: 10px;
+    margin-top: 0;
+    border-radius: 8px;
     padding: 15px 20px;
     border: 1px solid #e5e5e5;
     box-shadow: 0 8px 25px rgba(0,0,0,0.08);
@@ -152,7 +175,7 @@ function vnd($n){
 
 .dropdown-menu .dropdown-item:hover {
     background: #f5f5f5;
-    color: #ff5a00;
+    color: #000;
     transform: translateX(4px);
 }
 
@@ -160,6 +183,16 @@ function vnd($n){
 .dropdown-divider {
     margin: 6px 0;
     border-color: #ddd;
+}
+
+/* Mega menu styling */
+.mega-menu .dropdown-menu {
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+}
+
+.mega-menu:hover .dropdown-menu {
+    transform: translateX(-50%) translateY(0);
 }
 
 </style>
@@ -170,23 +203,29 @@ function vnd($n){
 
 <!-- TOPBAR -->
 <div class="topbar">
-  <div class="container d-flex justify-content-between">
-    <div>MIỄN PHÍ GIAO HÀNG TRÊN TOÀN QUỐC</div>
+  <div class="container d-flex justify-content-between align-items-center">
+    <div class="topbar-left">
+      <span>MIỄN PHÍ GIAO HÀNG TRÊN TOÀN QUỐC</span>
+    </div>
     
-    <div class="d-none d-lg-flex gap-4">
-      <span>Hotline: <b>0789.888.666</b></span>
-
-      <a href="#" class="auth-link">Tin tức</a>
-      <a href="#" class="auth-link">Hướng dẫn chọn size</a>
+    <div class="topbar-right d-none d-lg-flex gap-4 align-items-center">
+      <span>Hotline: <b>089.887.5522</b></span>
+      <?php if (isset($_SESSION['user_id'])): ?>
+        <a href="history.php" class="auth-link">Lịch sử mua hàng</a>
+        <a href="track_order.php" class="auth-link">Tra cứu đơn hàng</a>
+      <?php else: ?>
+        <a href="#" class="auth-link" data-bs-toggle="modal" data-bs-target="#loginModal">ĐĂNG NHẬP</a>
+        <a href="#" class="auth-link" data-bs-toggle="modal" data-bs-target="#registerModal">ĐĂNG KÝ</a>
+      <?php endif; ?>
     </div>
   </div>
 </div>
 
 <!-- NAVBAR -->
-<nav class="navbar navbar-expand-lg border-bottom bg-white">
+<nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top border-bottom">
   <div class="container">
-    <a class="navbar-brand logo d-flex align-items-center" href="#">
-      <i class="bi bi-triangle-fill me-2"></i> Giày Thể Thao Adodas
+    <a class="navbar-brand logo d-flex align-items-center" href="trangchu.php">
+      <strong style="font-size: 24px; font-weight: 700; color: #000;">Adodas</strong>
     </a>
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
@@ -195,55 +234,78 @@ function vnd($n){
 
     <div class="collapse navbar-collapse" id="navMain">
       <ul class="navbar-nav me-auto">
+        <!-- DANH MỤC (FROM DB) -->
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle" href="#" id="categoryMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-            DANH MỤC
+          <a class="nav-link dropdown-toggle" href="#" id="catMenu" role="button" data-bs-toggle="dropdown">
+            Danh mục
           </a>
-          <ul class="dropdown-menu" aria-labelledby="categoryMenu">
-            <li>
-              <a class="dropdown-item" href="trangchu.php">
-                TẤT CẢ SẢN PHẨM
-              </a>
-            </li>
-            <li><hr class="dropdown-divider"></li>
-
-            <li>
-              <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-da">
-                BẰNG DA
-              </a>
-            </li>
-            <li>
-              <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-da-tong-hop">
-                BẰNG DA TỔNG HỢP
-              </a>
-            </li>
-            <li>
-              <a class="dropdown-item" href="trangchu.php?category=giay-the-thao-vai-cao-cap">
-                BẰNG VẢI CAO CẤP
-              </a>
-            </li>
-            <li>
-              <a class="dropdown-item" href="trangchu.php?category=hang-moi-ve">
-                HÀNG MỚI VỀ
-              </a>
-            </li>
+          <ul class="dropdown-menu" aria-labelledby="catMenu">
+            <?php foreach ($categories as $cat): ?>
+              <li><a class="dropdown-item" href="trangchu.php?category=<?= htmlspecialchars($cat['slug']) ?>">
+                <?= htmlspecialchars($cat['name']) ?>
+              </a></li>
+            <?php endforeach; ?>
           </ul>
         </li>
-          <li class="nav-item dropdown">
-      <a class="nav-link dropdown-toggle" href="#" id="brandMenu" role="button">
-        THƯƠNG HIỆU
-      </a>
-      <ul class="dropdown-menu" aria-labelledby="brandMenu">
-        <li><a class="dropdown-item" href="trangchu.php?brand=nike">Nike</a></li>
-        <li><a class="dropdown-item" href="trangchu.php?brand=adidas">Adidas</a></li>
-        <li><a class="dropdown-item" href="trangchu.php?brand=puma">Puma</a></li>
-        <li><a class="dropdown-item" href="trangchu.php?brand=newbalance">New Balance</a></li>
-        <li><a class="dropdown-item" href="trangchu.php?brand=asic">Asics</a></li>
-        <li><a class="dropdown-item" href="trangchu.php?brand=converse">Converse</a></li>
-        <li><a class="dropdown-item" href="trangchu.php?brand=vans">Vans</a></li>
-        <li><a class="dropdown-item" href="trangchu.php?brand=dior">Dior</a></li>
-      </ul>
-    </li>
+
+        <!-- QUẦN ÁO -->
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" id="quanAoMenu" role="button">
+            QUẦN ÁO
+          </a>
+          <ul class="dropdown-menu" aria-labelledby="quanAoMenu">
+            <li><h6 class="dropdown-header">Nổi bật ⭐</h6></li>
+            <li><a class="dropdown-item" href="#">MLB</a></li>
+            <li><a class="dropdown-item" href="#">ADVL</a></li>
+            <li><a class="dropdown-item" href="#">Drew House</a></li>
+            <li><a class="dropdown-item" href="#">Essentials</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><h6 class="dropdown-header">Nike</h6></li>
+            <li><a class="dropdown-item" href="#">Áo</a></li>
+            <li><a class="dropdown-item" href="#">Quần</a></li>
+            <li><a class="dropdown-item" href="#">Váy</a></li>
+          </ul>
+        </li>
+
+        <!-- PHỤ KIỆN -->
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" id="phuKienMenu" role="button">
+            PHỤ KIỆN
+          </a>
+          <ul class="dropdown-menu" aria-labelledby="phuKienMenu">
+            <li><a class="dropdown-item" href="#">Dép</a></li>
+            <li><a class="dropdown-item" href="#">Kính mắt</a></li>
+            <li><a class="dropdown-item" href="#">Túi xách/Túi đeo chéo</a></li>
+            <li><a class="dropdown-item" href="#">Tất</a></li>
+            <li><a class="dropdown-item" href="#">Khẩu trang</a></li>
+            <li><a class="dropdown-item" href="#">Balo</a></li>
+            <li><a class="dropdown-item" href="#">Chăm sóc giày</a></li>
+          </ul>
+        </li>
+
+        <!-- THƯƠNG HIỆU -->
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" id="brandMenu" role="button">
+            THƯƠNG HIỆU
+          </a>
+          <ul class="dropdown-menu" aria-labelledby="brandMenu">
+            <li><a class="dropdown-item" href="trangchu.php?brand=nike">Nike</a></li>
+            <li><a class="dropdown-item" href="trangchu.php?brand=jordan">Jordan</a></li>
+            <li><a class="dropdown-item" href="trangchu.php?brand=adidas">Adidas</a></li>
+            <li><a class="dropdown-item" href="trangchu.php?brand=newbalance">New Balance</a></li>
+            <li><a class="dropdown-item" href="trangchu.php?brand=converse">Converse</a></li>
+            <li><a class="dropdown-item" href="trangchu.php?brand=puma">Puma</a></li>
+            <li><a class="dropdown-item" href="trangchu.php?brand=vans">Vans</a></li>
+            <li><a class="dropdown-item" href="trangchu.php?brand=mlb">MLB</a></li>
+          </ul>
+        </li>
+
+        <!-- SALE -->
+        <li class="nav-item">
+          <a class="nav-link text-danger fw-bold" href="trangchu.php?category=sale">
+            SALE 🔥
+          </a>
+        </li>
       </ul>
 
       <div class="d-flex align-items-center gap-2">
@@ -300,7 +362,7 @@ function vnd($n){
       <div class="hero-slide">
         <div class="hero-slide-inner">
           <div class="hero-img-wrap">
-            <img src="../images/baner1.png" alt="Giày thể thao giảm giá">
+            <img src="../images/banner1.png" alt="Giày thể thao giảm giá">
           </div>
           <div class="hero-content">
             <div class="hero-kicker">BLACK FRIDAY</div>
@@ -392,7 +454,7 @@ function vnd($n){
           <input class="form-check-input filter-category" type="checkbox" value="chay-bo"> Chạy Bộ
         </label>
         <label class="form-check">
-          <input class="form-check-input filter-category" type="checkbox" value="sneaker"> Sneaker
+          <input class="form-check-input filter-category" type="checkbox" value="Adodas"> Adodas
         </label>
         <label class="form-check">
           <input class="form-check-input filter-category" type="checkbox" value="the-thao"> Thể Thao
@@ -515,11 +577,127 @@ function vnd($n){
   </div>
   </div>
 
+<!-- BỘ LỌC NÂNG CAO -->
+<section class="container py-3">
+  <form method="GET" class="row g-2 align-items-end mb-4">
+    <div class="col-md-3">
+      <label class="form-label">Danh mục</label>
+      <select name="category" class="form-select">
+        <option value="">Tất cả</option>
+        <?php foreach ($categories as $cat): ?>
+          <option value="<?= htmlspecialchars($cat['slug']) ?>" <?= (($_GET['category'] ?? '') === $cat['slug'] ? 'selected' : '') ?>><?= htmlspecialchars($cat['name']) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Hãng</label>
+      <input type="text" name="brand" class="form-control" placeholder="VD: Nike" value="<?= htmlspecialchars($_GET['brand'] ?? '') ?>">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Màu</label>
+      <input type="text" name="color" class="form-control" placeholder="VD: Đen" value="<?= htmlspecialchars($_GET['color'] ?? '') ?>">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Giá từ</label>
+      <input type="number" name="price_min" class="form-control" value="<?= htmlspecialchars($_GET['price_min'] ?? '') ?>">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Giá đến</label>
+      <input type="number" name="price_max" class="form-control" value="<?= htmlspecialchars($_GET['price_max'] ?? '') ?>">
+    </div>
+    <div class="col-md-1 d-grid">
+      <button type="submit" class="btn btn-dark">Lọc</button>
+    </div>
+  </form>
+</section>
 
 </section>
 
+<!-- FLASH DEAL SECTION -->
+<?php if (count($products) > 0): ?>
+<section class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold mb-0" style="font-size: 1.75rem;">FLASH DEAL</h2>
+    <a href="trangchu.php?category=sale" class="text-decoration-none text-dark fw-bold">
+      Xem tất cả <i class="bi bi-arrow-right"></i>
+    </a>
+  </div>
+  <div class="row g-3">
+    <?php 
+    // Lấy 4 sản phẩm có sale_percent > 0 hoặc có old_price
+    $flashProducts = array_filter($products, function($p) {
+      return (!empty($p['sale_percent']) && $p['sale_percent'] > 0) || (!empty($p['old_price']) && $p['old_price'] > $p['price']);
+    });
+    $flashProducts = array_slice($flashProducts, 0, 4);
+    
+    if (count($flashProducts) === 0) {
+      $flashProducts = array_slice($products, 0, 4);
+    }
+    
+    foreach ($flashProducts as $p): 
+      $img = $p['image_main'] !== '' ? $p['image_main'] : '../images/placeholder.png';
+      $badge_html = '';
+      if (!empty($p['sale_percent']) && $p['sale_percent'] > 0) {
+        $badge_html = '<span class="badge-sale">'.htmlspecialchars($p['sale_percent']).'%</span>';
+      } elseif (!empty($p['old_price']) && $p['old_price'] > $p['price']) {
+        $discount = round((($p['old_price'] - $p['price']) / $p['old_price']) * 100);
+        $badge_html = '<span class="badge-sale">-'.htmlspecialchars($discount).'%</span>';
+      }
+      $price_show = vnd($p['price']);
+      $old_show = (!empty($p['old_price']) && $p['old_price'] > 0) ? vnd($p['old_price']) : '';
+    ?>
+    <div class="col-6 col-md-3">
+      <div class="card product-card position-relative" 
+           data-id="<?php echo $p['id']; ?>"
+           data-name="<?php echo htmlspecialchars($p['name']); ?>"
+           data-category="<?php echo htmlspecialchars($p['category']); ?>"
+           data-gender="<?php echo htmlspecialchars($p['gender']); ?>"
+           data-material="<?php echo htmlspecialchars($p['material']); ?>"
+           data-color="<?php echo htmlspecialchars($p['color']); ?>"
+           data-size="<?php echo htmlspecialchars($p['sizes']); ?>"
+           data-pattern="<?php echo htmlspecialchars($p['pattern']); ?>"
+           data-price="<?php echo htmlspecialchars($p['price']); ?>">
+        <?php echo $badge_html; ?>
+        <img class="card-img-top" src="<?php echo htmlspecialchars($img); ?>" alt="<?php echo htmlspecialchars($p['name']); ?>">
+        <div class="card-body">
+          <div class="small text-muted"><?php echo htmlspecialchars($p['brand']); ?></div>
+          <h6 class="card-title mb-1"><?php echo htmlspecialchars($p['name']); ?></h6>
+          <div class="d-flex align-items-baseline gap-2">
+            <span class="price"><?php echo $price_show; ?></span>
+            <?php if ($old_show !== ''): ?>
+              <small class="old"><?php echo $old_show; ?></small>
+            <?php endif; ?>
+          </div>
+        </div>
+      </div>
+    </div>
+    <?php endforeach; ?>
+  </div>
+</section>
+<?php endif; ?>
+
+<!-- FEATURED CATEGORIES từ DB -->
+<section class="container py-4">
+  <h2 class="fw-bold mb-4" style="font-size: 1.75rem;">Danh mục nổi bật</h2>
+  <div class="row g-3">
+    <?php foreach (array_slice($categories, 0, 4) as $cat): ?>
+      <div class="col-6 col-md-3">
+        <a href="trangchu.php?category=<?= htmlspecialchars($cat['slug']) ?>" class="text-decoration-none">
+          <div class="category-card text-center p-4 border rounded" style="background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); color: #fff; min-height: 150px; display: flex; flex-direction: column; justify-content: center;">
+            <h5 class="fw-bold mb-2"><?= htmlspecialchars($cat['name']) ?></h5>
+          </div>
+        </a>
+      </div>
+    <?php endforeach; ?>
+  </div>
+</section>
+
 <!-- PRODUCT GRID (render từ DB) -->
-<section class="container py-3">
+<section class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold mb-0" style="font-size: 1.75rem;">Tất cả sản phẩm</h2>
+    <span class="text-muted">(<?= $totalProducts ?> sản phẩm)</span>
+  </div>
   <div class="row g-3">
 
     <?php foreach ($products as $p): 
@@ -537,7 +715,6 @@ function vnd($n){
       <div
         class="card product-card position-relative"
         data-id="<?php echo $p['id']; ?>"
-        data-name="<?php echo htmlspecialchars($p['name']); ?>"
         data-name="<?php echo htmlspecialchars($p['name']); ?>"
         data-category="<?php echo htmlspecialchars($p['category']); ?>"
         data-gender="<?php echo htmlspecialchars($p['gender']); ?>"
@@ -576,11 +753,69 @@ function vnd($n){
     <?php endif; ?>
 
   </div>
+  <!-- PHÂN TRANG -->
+  <nav aria-label="Page navigation products">
+    <ul class="pagination justify-content-center mt-4">
+      <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+      <li class="page-item <?= $i == $page ? 'active' : '' ?>">
+        <a class="page-link" href="?<?php $params = $_GET; $params['page'] = $i; echo http_build_query($params); ?>"><?= $i ?></a>
+      </li>
+      <?php endfor; ?>
+    </ul>
+  </nav>
 </section>
 
 <!-- FOOTER -->
-<footer class="py-4 border-top">
-  <div class="container small text-center text-muted">© 2025 TheGioiGiay – Demo</div>
+<footer>
+  <div class="container">
+    <div class="row">
+      <div class="col-md-3 mb-4">
+        <h5>Về AdodasDaily</h5>
+        <a href="#">Giới thiệu</a>
+        <a href="#">Tuyển dụng</a>
+        <a href="#">Liên hệ</a>
+        <a href="#">Hệ thống cửa hàng</a>
+      </div>
+      <div class="col-md-3 mb-4">
+        <h5>Hỗ trợ khách hàng</h5>
+        <a href="#">Câu hỏi thường gặp</a>
+        <a href="#">Hướng dẫn đặt hàng</a>
+        <a href="#">Hướng dẫn chọn size</a>
+        <a href="#">Chính sách đổi trả</a>
+        <a href="#">Chính sách bảo hành</a>
+      </div>
+      <div class="col-md-3 mb-4">
+        <h5>Thông tin</h5>
+        <a href="#">Tin tức</a>
+        <a href="#">Tạp chí giày</a>
+        <a href="#">Khuyến mãi</a>
+        <a href="#">Sitemap</a>
+      </div>
+      <div class="col-md-3 mb-4">
+        <h5>Liên hệ</h5>
+        <p style="color: #ccc; margin-bottom: 0.5rem;">
+          <strong>Hotline:</strong><br>
+          <a href="tel:0898875522" style="color: #fff; font-size: 1.1rem;">089.887.5522</a>
+        </p>
+        <p style="color: #ccc; margin-bottom: 0.5rem;">
+          <strong>Email:</strong><br>
+          <a href="mailto:info@Adodasdaily.vn" style="color: #fff;">info@Adodasdaily.vn</a>
+        </p>
+        <p style="color: #ccc;">
+          <strong>Giờ làm việc:</strong><br>
+          9:30 - 22:00 (Tất cả các ngày)
+        </p>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div class="footer-links">
+        <a href="#">Chính sách bảo mật</a>
+        <a href="#">Điều khoản sử dụng</a>
+        <a href="#">Chính sách vận chuyển</a>
+      </div>
+      <p class="mb-0">© 2025 Adodas. All rights reserved.</p>
+    </div>
+  </div>
 </footer>
 
 <!-- OVERLAY ĐĂNG XUẤT -->
@@ -1128,6 +1363,179 @@ document.querySelectorAll('.btn-add-cart-auto, .btn-buy-now-auto')
 });
 </script>
 
+
+<!-- MODAL ĐĂNG NHẬP -->
+<div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-bottom">
+        <h5 class="modal-title fw-bold" id="loginModalLabel">Đăng nhập</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div id="loginError" class="alert alert-danger d-none"></div>
+        <form id="loginForm">
+          <div class="mb-3">
+            <label class="form-label">Tên tài khoản hoặc địa chỉ email <span class="text-danger">*</span></label>
+            <input type="email" name="email" class="form-control" required placeholder="Email của bạn">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Mật khẩu <span class="text-danger">*</span></label>
+            <input type="password" name="password" class="form-control" required placeholder="Mật khẩu">
+          </div>
+          <div class="mb-3 d-flex justify-content-between align-items-center">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rememberMe">
+              <label class="form-check-label small" for="rememberMe">Ghi nhớ mật khẩu</label>
+            </div>
+            <a href="forgot_password.php" class="small text-decoration-none">Quên mật khẩu?</a>
+          </div>
+          <button type="submit" class="btn btn-dark w-100 mb-3">Đăng nhập</button>
+          <div class="text-center mt-3">
+            <span class="small">Bạn chưa có tài khoản?</span>
+            <a href="#" class="small text-decoration-none fw-bold" data-bs-dismiss="modal" data-bs-toggle="modal" data-bs-target="#registerModal">Đăng ký</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ĐĂNG KÝ -->
+<div class="modal fade" id="registerModal" tabindex="-1" aria-labelledby="registerModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-bottom">
+        <h5 class="modal-title fw-bold" id="registerModalLabel">Đăng ký</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div id="registerError" class="alert alert-danger d-none"></div>
+        <div id="registerSuccess" class="alert alert-success d-none"></div>
+        <form id="registerForm">
+          <div class="mb-3">
+            <label class="form-label">Địa chỉ email <span class="text-danger">*</span></label>
+            <input type="email" name="email" class="form-control" required placeholder="Email của bạn">
+            <small class="text-muted">Một mật khẩu sẽ được gửi đến địa chỉ email của bạn.</small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Họ và tên <span class="text-danger">*</span></label>
+            <input type="text" name="fullname" class="form-control" required placeholder="Họ và tên của bạn">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Mật khẩu <span class="text-danger">*</span></label>
+            <input type="password" name="password" class="form-control" minlength="6" required placeholder="Tối thiểu 6 ký tự">
+          </div>
+          <button type="submit" class="btn btn-dark w-100 mb-3">Đăng ký</button>
+          <div class="text-center mt-3">
+            <span class="small">Bạn đã có tài khoản?</span>
+            <a href="#" class="small text-decoration-none fw-bold" data-bs-dismiss="modal" data-bs-toggle="modal" data-bs-target="#loginModal">Đăng nhập</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCRIPT XỬ LÝ ĐĂNG NHẬP/ĐĂNG KÝ -->
+<script>
+// Xử lý đăng nhập
+document.getElementById('loginForm')?.addEventListener('submit', async function(e) {
+  e.preventDefault();
+  
+  const formData = new FormData(this);
+  formData.append('action', 'login');
+  
+  const errorDiv = document.getElementById('loginError');
+  errorDiv.classList.add('d-none');
+  
+  try {
+    const response = await fetch('auth_ajax.php', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      // Đăng nhập thành công
+      const modal = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
+      modal.hide();
+      
+      // Reload trang để cập nhật session
+      window.location.reload();
+    } else {
+      // Hiển thị lỗi
+      errorDiv.textContent = result.message;
+      errorDiv.classList.remove('d-none');
+    }
+  } catch (error) {
+    errorDiv.textContent = 'Có lỗi xảy ra. Vui lòng thử lại.';
+    errorDiv.classList.remove('d-none');
+  }
+});
+
+// Xử lý đăng ký
+document.getElementById('registerForm')?.addEventListener('submit', async function(e) {
+  e.preventDefault();
+  
+  const formData = new FormData(this);
+  formData.append('action', 'register');
+  
+  const errorDiv = document.getElementById('registerError');
+  const successDiv = document.getElementById('registerSuccess');
+  errorDiv.classList.add('d-none');
+  successDiv.classList.add('d-none');
+  
+  try {
+    const response = await fetch('auth_ajax.php', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      // Đăng ký thành công
+      successDiv.innerHTML = result.message;
+      successDiv.classList.remove('d-none');
+      
+      // Reset form
+      this.reset();
+      
+      // Tự động chuyển sang modal đăng nhập sau 3 giây
+      setTimeout(() => {
+        const registerModal = bootstrap.Modal.getInstance(document.getElementById('registerModal'));
+        registerModal.hide();
+        
+        setTimeout(() => {
+          const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
+          loginModal.show();
+        }, 300);
+      }, 3000);
+    } else {
+      // Hiển thị lỗi
+      errorDiv.textContent = result.message;
+      errorDiv.classList.remove('d-none');
+    }
+  } catch (error) {
+    errorDiv.textContent = 'Có lỗi xảy ra. Vui lòng thử lại.';
+    errorDiv.classList.remove('d-none');
+  }
+});
+
+// Reset form khi đóng modal
+document.getElementById('loginModal')?.addEventListener('hidden.bs.modal', function() {
+  document.getElementById('loginForm')?.reset();
+  document.getElementById('loginError').classList.add('d-none');
+});
+
+document.getElementById('registerModal')?.addEventListener('hidden.bs.modal', function() {
+  document.getElementById('registerForm')?.reset();
+  document.getElementById('registerError').classList.add('d-none');
+  document.getElementById('registerSuccess').classList.add('d-none');
+});
+</script>
 
 </body>
 </html>

@@ -1,5 +1,5 @@
 <?php
-$host = "localhost";   // máy chủ MySQL
+$host = "localhost:3306";   // máy chủ MySQL
 $user = "root";        // tài khoản mặc định của XAMPP
 $pass = "";            // mật khẩu trống (XAMPP)
 $db   = "shop";        // TÊN DATABASE BẠN ĐANG DÙNG
