@@ -1,0 +1,72 @@
+/* Font và nền tổng thể */
+body {
+    background: linear-gradient(135deg, #f5f7fa, #eaeef3);
+    font-family: 'Inter', sans-serif;
+}
+
+/* Khối container */
+.container {
+    animation: fadeIn 0.7s ease;
+}
+
+/* Card form */
+.card {
+    border: none;
+    border-radius: 16px;
+    padding: 25px;
+    background: #ffffff;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+}
+
+h3 {
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+/* Input style */
+.form-control {
+    border-radius: 10px;
+    padding: 10px 14px;
+    border: 1.5px solid #d7d7d7;
+    transition: 0.25s;
+}
+
+.form-control:focus {
+    border-color: #000;
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.08);
+}
+
+/* Button */
+.btn-dark {
+    border-radius: 10px;
+    padding: 10px;
+    font-weight: 600;
+    transition: 0.3s;
+}
+
+.btn-dark:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+/* Link đăng ký */
+a {
+    font-weight: 600;
+    color: #000;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Alert */
+.alert {
+    border-radius: 10px;
+    font-size: 14px;
+}
+
+/* Animation */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
