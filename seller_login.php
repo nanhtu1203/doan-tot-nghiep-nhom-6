@@ -21,6 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['seller_id']   = $seller['id'];
         $_SESSION['seller_name'] = $seller['fullname'];
         $_SESSION['shop_name']   = $seller['shop_name'];
+        $_SESSION['role']       = 'seller';
 
         // Điều hướng sang trang quản lý shop
         header("Location: seller_dashboard.php");

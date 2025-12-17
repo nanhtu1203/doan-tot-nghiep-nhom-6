@@ -4,13 +4,15 @@ require 'connect.php';
 
 // Bắt buộc đăng nhập
 if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php?message=Vui lòng đăng nhập để xem lịch sử mua hàng");
+    header("Location: trangchu.php?show_login=1");
     exit;
 }
 
 $userId   = $_SESSION['user_id'];
 $fullname = $_SESSION['fullname'] ?? '';
 $email    = $_SESSION['email'] ?? '';
+
+$pageTitle = 'Lịch sử mua hàng';
 
 // XỬ LÝ HỦY ĐƠN / TRẢ HÀNG
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -86,18 +88,25 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 function vnd($n) {
     return number_format((int)$n, 0, ',', '.') . '₫';
 }
+
+include 'header.php';
+
+// Hiển thị thông báo thành công nếu có
+$successMsg = '';
+if (isset($_GET['success']) && $_GET['success'] == '1') {
+    $successMsg = 'Đặt hàng thành công! Đơn hàng của bạn đang được xử lý.';
+}
 ?>
-<!doctype html>
-<html lang="vi">
-<head>
-    <meta charset="utf-8">
-    <title>Lịch sử mua hàng</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
 
 <div class="container py-4">
     <h3 class="mb-3">Lịch sử mua hàng</h3>
+    
+    <?php if ($successMsg): ?>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle me-2"></i><?= htmlspecialchars($successMsg) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    <?php endif; ?>
 
     <p><strong>Tài khoản:</strong> <?php echo htmlspecialchars($fullname); ?></p>
     <p><strong>Email:</strong> <?php echo htmlspecialchars($email); ?></p>
@@ -183,5 +192,4 @@ function vnd($n) {
     <?php endif; ?>
 </div>
 
-</body>
-</html>
+<?php include 'footer.php'; ?>

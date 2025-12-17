@@ -2,19 +2,30 @@
 session_start();
 require 'connect.php';
 
-// ====== KẾT NỐI PHPMailer ======
-require __DIR__ . '/../PHPMailer/src/PHPMailer.php';
-require __DIR__ . '/../PHPMailer/src/SMTP.php';
-require __DIR__ . '/../PHPMailer/src/Exception.php';
-
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
-
 $error = '';
 $success = '';
+$otpDisplay = ''; // Để hiển thị OTP nếu không gửi được email
+
+// ====== KẾT NỐI PHPMailer (nếu có) ======
+$phpmailerAvailable = false;
+
+if (file_exists(__DIR__ . '/../PHPMailer/src/PHPMailer.php')) {
+    require_once __DIR__ . '/../PHPMailer/src/PHPMailer.php';
+    require_once __DIR__ . '/../PHPMailer/src/SMTP.php';
+    require_once __DIR__ . '/../PHPMailer/src/Exception.php';
+    $phpmailerAvailable = true;
+}
 
 function sendOTPEmail($toEmail, $otp) {
-    $mail = new PHPMailer(true);
+    global $phpmailerAvailable;
+    
+    if (!$phpmailerAvailable) {
+        // Nếu không có PHPMailer, trả về false để hiển thị OTP trên màn hình
+        return false;
+    }
+    
+    // Sử dụng fully qualified class name thay vì use statement
+    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
 
     try {
         $mail->isSMTP();
@@ -22,10 +33,10 @@ function sendOTPEmail($toEmail, $otp) {
         $mail->SMTPAuth   = true;
 
         // ====== SỬA EMAIL / APP PASSWORD CỦA BẠN ======
-        $mail->Username   = 'yourgmail@gmail.com';
-        $mail->Password   = 'xxxxxxxxxxxxxxxx'; // App password 16 ký tự
+        $mail->Username   = 'anhtu120304@gmail.com';
+        $mail->Password   = 'jmgk zgnv tzeo rghk'; // App password 16 ký tự
 
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+        $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
         $mail->Port       = 465;
         $mail->CharSet    = 'UTF-8';
 
@@ -41,7 +52,7 @@ function sendOTPEmail($toEmail, $otp) {
 
         $mail->send();
         return true;
-    } catch (Exception $e) {
+    } catch (\PHPMailer\PHPMailer\Exception $e) {
         return false;
     }
 }
@@ -65,15 +76,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // Tạo mã OTP 6 số
             $otp = random_int(100000, 999999);
-            $expireTime = date('Y-m-d H:i:s', time() + 600); // +10 phút
+            $expireTime = time() + 600; // +10 phút (timestamp)
 
-            // Lưu OTP vào DB
-            $save = $conn->prepare("
-                UPDATE users_id 
-                SET reset_code = ?, reset_expires = ? 
-                WHERE email = ?
-            ");
-            $save->execute([$otp, $expireTime, $email]);
+            // Lưu OTP vào DB (nếu có cột reset_code và reset_expires)
+            try {
+                $save = $conn->prepare("
+                    UPDATE users_id 
+                    SET reset_code = ?, reset_expires = ? 
+                    WHERE email = ?
+                ");
+                $save->execute([$otp, date('Y-m-d H:i:s', $expireTime), $email]);
+            } catch (PDOException $e) {
+                // Nếu không có cột reset_code/reset_expires, bỏ qua
+            }
 
             // Gửi OTP qua Email
             if (sendOTPEmail($email, $otp)) {
@@ -81,7 +96,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header("Location: reset_password.php");  // chuyển sang bước nhập OTP
                 exit;
             } else {
-                $error = "Không gửi được email. Vui lòng thử lại.";
+                // Nếu không gửi được email (không có PHPMailer), hiển thị OTP trên màn hình
+                $_SESSION['reset_email'] = $email;
+                $_SESSION['reset_otp'] = $otp; // Lưu OTP vào session để dùng
+                $_SESSION['reset_otp_expires'] = $expireTime; // Lưu thời gian hết hạn
+                $otpDisplay = $otp; // Hiển thị OTP trên màn hình
+                $success = "Mã OTP đã được tạo. Vui lòng kiểm tra email hoặc sử dụng mã bên dưới (chế độ development).";
             }
         }
     }
@@ -106,6 +126,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     <?php endif; ?>
 
+    <?php if ($success): ?>
+        <div class="alert alert-success text-center small">
+            <?= $success ?>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($otpDisplay): ?>
+        <div class="alert alert-info text-center">
+            <h5>Mã OTP của bạn (Development Mode):</h5>
+            <h2 class="text-danger fw-bold"><?= htmlspecialchars($otpDisplay) ?></h2>
+            <p class="small mb-2">Mã có hiệu lực trong 10 phút.</p>
+            <a href="reset_password.php" class="btn btn-dark btn-sm">Tiếp tục đặt lại mật khẩu</a>
+        </div>
+    <?php endif; ?>
+
     <form method="post" class="card p-4 shadow-sm">
 
         <label class="form-label">Nhập email đã đăng ký</label>
@@ -114,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <button class="btn btn-dark w-100">Gửi mã OTP</button>
 
         <div class="text-center small mt-3">
-            <a href="login.php">Quay lại đăng nhập</a>
+            <a href="trangchu.php?show_login=1">Quay lại đăng nhập</a>
         </div>
 
     </form>

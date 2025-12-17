@@ -9,7 +9,7 @@ $code  = $_GET['code']  ?? '';
 
 if ($email !== '' && $code !== '') {
 
-    $sql = "SELECT id FROM users 
+    $sql = "SELECT id FROM users_id 
             WHERE email = ? AND verification_code = ? AND is_verified = 0";
     $stmt = $conn->prepare($sql);
     $stmt->execute([$email, $code]);
@@ -18,7 +18,7 @@ if ($email !== '' && $code !== '') {
     if ($user) {
         // cập nhật đã xác minh
         $upd = $conn->prepare("
-            UPDATE users 
+            UPDATE users_id 
             SET is_verified = 1, verification_code = NULL
             WHERE id = ?
         ");
@@ -57,7 +57,7 @@ if ($email !== '' && $code !== '') {
   <?php endif; ?>
 
   <div class="text-center mt-3">
-    <a href="login.php" class="btn btn-dark">Đến trang đăng nhập</a>
+    <a href="trangchu.php?show_login=1" class="btn btn-dark">Đến trang đăng nhập</a>
   </div>
 </div>
 </body>

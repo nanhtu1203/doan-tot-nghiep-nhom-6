@@ -17,7 +17,7 @@
     
     <div class="d-none d-lg-flex gap-4">
       <span>Hotline: <b>0906.413.666</b></span>
-        <a href="../php/login.php" class="auth-link">ĐĂNG NHẬP</a>
+        <a href="../php/trangchu.php?show_login=1" class="auth-link">ĐĂNG NHẬP</a>
         <a href="../php/register.php" class="auth-link">ĐĂNG KÍ</a>
         <a href="#" class="auth-link">Tin tức</a>
         <a href="#" class="auth-link">Tra cứu đơn hàng</a>

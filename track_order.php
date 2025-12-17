@@ -3,6 +3,8 @@
 session_start();
 require 'connect.php';
 
+$pageTitle = 'Tra cứu đơn hàng';
+
 $order  = null;
 $items  = [];
 $error  = '';
@@ -55,18 +57,9 @@ if (isset($_GET['order_code'])) {
 function vnd($n) {
     return number_format((int)$n, 0, ',', '.') . '₫';
 }
+
+include 'header.php';
 ?>
-<!doctype html>
-<html lang="vi">
-<head>
-    <meta charset="utf-8">
-    <title>Tra cứu đơn hàng</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-      rel="stylesheet">
-</head>
-<body class="bg-light">
 
 <div class="container py-4" style="max-width:800px">
     <h3 class="mb-3">Tra cứu đơn hàng</h3>
@@ -163,5 +156,4 @@ function vnd($n) {
     </div>
 </div>
 
-</body>
-</html>
+<?php include 'footer.php'; ?>
